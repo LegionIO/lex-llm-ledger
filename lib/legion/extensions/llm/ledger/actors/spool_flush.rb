@@ -6,6 +6,14 @@ module Legion
       module Ledger
         module Actor
           class SpoolFlush < Legion::Extensions::Actors::Every # rubocop:disable Legion/Extension/EveryActorRequiresTime
+            def runner_class
+              'Legion::Extensions::Llm::Ledger::Runners::Metering'
+            end
+
+            def runner_function
+              'write_metering_record'
+            end
+
             def time
               60
             end

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.8] - 2026-04-09
+
+### Fixed
+- SpoolFlush actor adds runner_class/runner_function to satisfy framework base actor const_get resolution
+
 ## [0.1.7] - 2026-04-09
 
 ### Changed
