@@ -1,10 +1,11 @@
 # Changelog
 
-## [0.1.5] - 2026-04-09
+## [0.1.6] - 2026-04-09
 
 ### Changed
+- Rename module namespace from `Legion::Extensions::LLM::Ledger` to `Legion::Extensions::Llm::Ledger` for framework const_get compatibility
 - Add legion-llm dependency to gemspec
-- Use legion-llm exchange classes (Legion::LLM::Metering::Exchange, Legion::LLM::Transport::Exchanges::Audit) instead of local duplicates
+- Use legion-llm exchange classes (Legion::LLM::Transport::Exchanges::Metering, ::Audit) instead of local duplicates
 - Remove local exchange files in favor of legion-llm originals
 
 ### Fixed

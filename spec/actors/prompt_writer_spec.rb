@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
-RSpec.describe Legion::Extensions::LLM::Ledger::Actor::PromptWriter do
+RSpec.describe Legion::Extensions::Llm::Ledger::Actor::PromptWriter do
   subject(:actor) { described_class.new }
 
   it 'returns Runners::Prompts as runner_class' do
-    expect(actor.runner_class).to eq(Legion::Extensions::LLM::Ledger::Runners::Prompts)
+    expect(actor.runner_class).to eq(Legion::Extensions::Llm::Ledger::Runners::Prompts)
   end
 
   it 'returns write_prompt_record as runner_function' do

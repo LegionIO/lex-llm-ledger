@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-RSpec.describe Legion::Extensions::LLM::Ledger::Helpers::Retention do
+RSpec.describe Legion::Extensions::Llm::Ledger::Helpers::Retention do
   describe '.resolve' do
     context 'with default retention' do
       it 'returns approximately 90 days from now' do

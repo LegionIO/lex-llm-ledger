@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
-RSpec.describe Legion::Extensions::LLM::Ledger::Actor::MeteringWriter do
+RSpec.describe Legion::Extensions::Llm::Ledger::Actor::MeteringWriter do
   subject(:actor) { described_class.new }
 
   it 'returns Runners::Metering as runner_class' do
-    expect(actor.runner_class).to eq(Legion::Extensions::LLM::Ledger::Runners::Metering)
+    expect(actor.runner_class).to eq(Legion::Extensions::Llm::Ledger::Runners::Metering)
   end
 
   it 'returns write_metering_record as runner_function' do

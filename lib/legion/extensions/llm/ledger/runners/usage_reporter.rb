@@ -2,7 +2,7 @@
 
 module Legion
   module Extensions
-    module LLM
+    module Llm
       module Ledger
         module Runners
           module UsageReporter

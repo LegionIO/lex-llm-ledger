@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-RSpec.describe Legion::Extensions::LLM::Ledger::Helpers::Queries do
+RSpec.describe Legion::Extensions::Llm::Ledger::Helpers::Queries do
   describe '.period_start' do
     it 'returns approximately 1 hour ago for hour' do
       result = described_class.period_start('hour')

@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
-RSpec.describe Legion::Extensions::LLM::Ledger::Actor::ToolWriter do
+RSpec.describe Legion::Extensions::Llm::Ledger::Actor::ToolWriter do
   subject(:actor) { described_class.new }
 
   it 'returns Runners::Tools as runner_class' do
-    expect(actor.runner_class).to eq(Legion::Extensions::LLM::Ledger::Runners::Tools)
+    expect(actor.runner_class).to eq(Legion::Extensions::Llm::Ledger::Runners::Tools)
   end
 
   it 'returns write_tool_record as runner_function' do

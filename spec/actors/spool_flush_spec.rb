@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-RSpec.describe Legion::Extensions::LLM::Ledger::Actor::SpoolFlush do
+RSpec.describe Legion::Extensions::Llm::Ledger::Actor::SpoolFlush do
   subject(:actor) { described_class.new }
 
   it 'returns 60 for time' do

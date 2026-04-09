@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-RSpec.describe Legion::Extensions::LLM::Ledger::Runners::Metering do
+RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Metering do
   let(:payload) do
     {
       message_context: {

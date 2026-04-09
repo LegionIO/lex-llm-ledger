@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-RSpec.describe Legion::Extensions::LLM::Ledger::Runners::Tools do
+RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Tools do
   let(:decrypted_body) do
     {
       message_context: {
@@ -107,7 +107,7 @@ RSpec.describe Legion::Extensions::LLM::Ledger::Runners::Tools do
       metadata[:properties][:content_encoding] = 'encrypted/cs'
       expect do
         described_class.write_tool_record('encrypted_blob', metadata)
-      end.to raise_error(Legion::Extensions::LLM::Ledger::Helpers::DecryptionUnavailable)
+      end.to raise_error(Legion::Extensions::Llm::Ledger::Helpers::DecryptionUnavailable)
     end
   end
 end

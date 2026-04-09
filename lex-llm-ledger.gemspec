@@ -6,7 +6,7 @@ require 'legion/extensions/llm/ledger/version'
 
 Gem::Specification.new do |spec|
   spec.name          = 'lex-llm-ledger'
-  spec.version       = Legion::Extensions::LLM::Ledger::VERSION
+  spec.version       = Legion::Extensions::Llm::Ledger::VERSION
   spec.authors       = ['Esity']
   spec.email         = ['matthewdiverson@gmail.com']
 

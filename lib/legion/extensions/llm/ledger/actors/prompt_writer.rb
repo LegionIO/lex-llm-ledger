@@ -4,11 +4,11 @@ require 'legion/extensions/actors/subscription'
 
 module Legion
   module Extensions
-    module LLM
+    module Llm
       module Ledger
         module Actor
           class PromptWriter < Legion::Extensions::Actors::Subscription
-            def runner_class = Legion::Extensions::LLM::Ledger::Runners::Prompts
+            def runner_class = Legion::Extensions::Llm::Ledger::Runners::Prompts
 
             def runner_function
               'write_prompt_record'

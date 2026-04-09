@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-RSpec.describe Legion::Extensions::LLM::Ledger::Helpers::Decryption do
+RSpec.describe Legion::Extensions::Llm::Ledger::Helpers::Decryption do
   let(:cleartext_payload) { { message_context: { conversation_id: 'conv_123' }, data: 'hello' } }
 
   describe '.decrypt_if_needed' do
@@ -49,7 +49,7 @@ RSpec.describe Legion::Extensions::LLM::Ledger::Helpers::Decryption do
         metadata = { properties: { content_encoding: 'encrypted/cs' } }
         expect do
           described_class.decrypt_if_needed('encrypted_blob', metadata)
-        end.to raise_error(Legion::Extensions::LLM::Ledger::Helpers::DecryptionUnavailable)
+        end.to raise_error(Legion::Extensions::Llm::Ledger::Helpers::DecryptionUnavailable)
       end
     end
 
@@ -71,7 +71,7 @@ RSpec.describe Legion::Extensions::LLM::Ledger::Helpers::Decryption do
         }
         expect do
           described_class.decrypt_if_needed('bad_data', metadata)
-        end.to raise_error(Legion::Extensions::LLM::Ledger::Helpers::DecryptionFailed, /bad ciphertext/)
+        end.to raise_error(Legion::Extensions::Llm::Ledger::Helpers::DecryptionFailed, /bad ciphertext/)
       end
     end
   end

@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-RSpec.describe Legion::Extensions::LLM::Ledger::Runners::UsageReporter do
+RSpec.describe Legion::Extensions::Llm::Ledger::Runners::UsageReporter do
   def insert_metering(overrides = {})
     defaults = {
       message_id:      "meter_#{SecureRandom.hex(4)}",

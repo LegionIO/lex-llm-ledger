@@ -25,7 +25,7 @@ end
 
 module Legion
   module Extensions
-    module LLM
+    module Llm
       module Ledger
         extend Legion::Extensions::Core if Legion::Extensions.const_defined?(:Core, false)
 

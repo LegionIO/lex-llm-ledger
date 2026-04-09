@@ -4,11 +4,11 @@ require 'legion/extensions/actors/subscription'
 
 module Legion
   module Extensions
-    module LLM
+    module Llm
       module Ledger
         module Actor
           class ToolWriter < Legion::Extensions::Actors::Subscription
-            def runner_class = Legion::Extensions::LLM::Ledger::Runners::Tools
+            def runner_class = Legion::Extensions::Llm::Ledger::Runners::Tools
 
             def runner_function
               'write_tool_record'

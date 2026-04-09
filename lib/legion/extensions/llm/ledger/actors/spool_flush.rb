@@ -2,7 +2,7 @@
 
 module Legion
   module Extensions
-    module LLM
+    module Llm
       module Ledger
         module Actor
           class SpoolFlush < Legion::Extensions::Actors::Every # rubocop:disable Legion/Extension/EveryActorRequiresTime
