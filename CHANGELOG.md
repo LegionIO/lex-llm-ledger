@@ -1,9 +1,19 @@
 # Changelog
 
-## [0.1.4] - 2026-04-09
+## [0.1.5] - 2026-04-09
+
+### Changed
+- Add legion-llm dependency to gemspec
+- Use legion-llm exchange classes (Legion::LLM::Metering::Exchange, Legion::LLM::Transport::Exchanges::Audit) instead of local duplicates
+- Remove local exchange files in favor of legion-llm originals
 
 ### Fixed
 - Transport additional_e_to_q uses `from:`/`to:`/`routing_key:` keys matching framework bind_e_to_q contract
+
+## [0.1.4] - 2026-04-09
+
+### Fixed
+- Transport additional_e_to_q uses `from:`/`to:`/`routing_key:` keys matching framework bind_e_to_q contract (unreleased)
 
 ## [0.1.3] - 2026-04-09
 

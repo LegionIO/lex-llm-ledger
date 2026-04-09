@@ -40,6 +40,20 @@ module Legion
     end
   end
 
+  module LLM
+    module Transport
+      module Exchanges
+        class Metering < Legion::Transport::Exchange
+          def exchange_name = 'llm.metering'
+        end
+
+        class Audit < Legion::Transport::Exchange
+          def exchange_name = 'llm.audit'
+        end
+      end
+    end
+  end
+
   module Logging
     def self.error(_msg) = nil
     def self.warn(_msg)  = nil
@@ -74,6 +88,8 @@ $LOADED_FEATURES << 'legion/extensions/actors/subscription'
 $LOADED_FEATURES << 'legion/extensions/transport'
 $LOADED_FEATURES << 'legion/transport/exchange.rb'
 $LOADED_FEATURES << 'legion/transport/queue.rb'
+$LOADED_FEATURES << 'legion/llm/transport/exchanges/metering'
+$LOADED_FEATURES << 'legion/llm/transport/exchanges/audit'
 
 lib = File.expand_path('../lib', __dir__)
 $LOAD_PATH.unshift(lib) unless $LOAD_PATH.include?(lib)
@@ -87,8 +103,6 @@ require 'legion/extensions/llm/ledger/runners/prompts'
 require 'legion/extensions/llm/ledger/runners/tools'
 require 'legion/extensions/llm/ledger/runners/usage_reporter'
 require 'legion/extensions/llm/ledger/runners/provider_stats'
-require 'legion/extensions/llm/ledger/transport/exchanges/metering'
-require 'legion/extensions/llm/ledger/transport/exchanges/audit'
 require 'legion/extensions/llm/ledger/transport/queues/metering_write'
 require 'legion/extensions/llm/ledger/transport/queues/audit_prompts'
 require 'legion/extensions/llm/ledger/transport/queues/audit_tools'
