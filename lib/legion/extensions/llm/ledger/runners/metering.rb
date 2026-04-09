@@ -8,6 +8,17 @@ module Legion
           module Metering
             extend self
 
+            def spool_flush
+              return unless defined?(Legion::LLM::Metering) &&
+                            Legion::LLM::Metering.respond_to?(:flush_spool)
+
+              Legion::LLM::Metering.flush_spool
+              { result: :ok }
+            rescue StandardError => e
+              Legion::Logging.warn("[lex-llm-ledger] spool_flush failed: #{e.message}") # rubocop:disable Legion/HelperMigration/DirectLogging
+              { result: :error, error: e.message }
+            end
+
             def write_metering_record(payload, metadata = {})
               ctx   = payload[:message_context] || {}
               props = metadata[:properties] || {}

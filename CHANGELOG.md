@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.9] - 2026-04-09
+
+### Fixed
+- SpoolFlush runner_function points to `spool_flush` (zero-arg) instead of `write_metering_record` (requires payload)
+- Add `Runners::Metering.spool_flush` method that the framework can call on Every actor ticks
+
 ## [0.1.8] - 2026-04-09
 
 ### Fixed

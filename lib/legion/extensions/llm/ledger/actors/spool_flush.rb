@@ -11,7 +11,7 @@ module Legion
             end
 
             def runner_function
-              'write_metering_record'
+              'spool_flush'
             end
 
             def time
