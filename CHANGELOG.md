@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.1] - 2026-04-09
+
+### Added
+- GitHub Actions CI workflow (ci, security, excluded-files, version-changelog, dependency-review, stale, release)
+
 ## [0.1.0] - 2026-04-09
 
 ### Added
