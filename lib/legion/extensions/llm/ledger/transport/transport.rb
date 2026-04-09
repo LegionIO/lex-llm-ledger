@@ -16,19 +16,19 @@ module Legion
           def self.additional_e_to_q
             [
               {
-                exchange: Exchanges::Metering,
-                queue:    Queues::MeteringWrite,
-                binding:  'metering.#'
+                from:        Legion::Extensions::LLM::Ledger::Transport::Exchanges::Metering,
+                to:          Legion::Extensions::LLM::Ledger::Transport::Queues::MeteringWrite,
+                routing_key: 'metering.#'
               },
               {
-                exchange: Exchanges::Audit,
-                queue:    Queues::AuditPrompts,
-                binding:  'audit.prompt.#'
+                from:        Legion::Extensions::LLM::Ledger::Transport::Exchanges::Audit,
+                to:          Legion::Extensions::LLM::Ledger::Transport::Queues::AuditPrompts,
+                routing_key: 'audit.prompt.#'
               },
               {
-                exchange: Exchanges::Audit,
-                queue:    Queues::AuditTools,
-                binding:  'audit.tool.#'
+                from:        Legion::Extensions::LLM::Ledger::Transport::Exchanges::Audit,
+                to:          Legion::Extensions::LLM::Ledger::Transport::Queues::AuditTools,
+                routing_key: 'audit.tool.#'
               }
             ]
           end

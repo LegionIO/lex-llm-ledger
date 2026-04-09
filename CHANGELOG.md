@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.4] - 2026-04-09
+
+### Fixed
+- Transport additional_e_to_q uses `from:`/`to:`/`routing_key:` keys matching framework bind_e_to_q contract
+
 ## [0.1.3] - 2026-04-09
 
 ### Fixed
