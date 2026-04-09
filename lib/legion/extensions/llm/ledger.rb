@@ -11,8 +11,12 @@ require_relative 'ledger/runners/usage_reporter'
 require_relative 'ledger/runners/provider_stats'
 
 if Legion::Extensions.const_defined?(:Core, false)
-  require 'legion/llm/transport/exchanges/metering'
-  require 'legion/llm/transport/exchanges/audit'
+  begin
+    require 'legion/llm/transport/exchanges/metering'
+    require 'legion/llm/transport/exchanges/audit'
+  rescue LoadError => _e
+    nil
+  end
   require_relative 'ledger/transport/queues/metering_write'
   require_relative 'ledger/transport/queues/audit_prompts'
   require_relative 'ledger/transport/queues/audit_tools'

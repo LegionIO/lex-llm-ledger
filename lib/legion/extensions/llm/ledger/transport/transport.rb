@@ -1,20 +1,15 @@
 # frozen_string_literal: true
 
-begin
-  require 'legion/extensions/transport'
-  require 'legion/llm/transport/exchanges/audit'
-  require 'legion/llm/transport/exchanges/escalation'
-  require 'legion/llm/transport/exchanges/metering'
-rescue LoadError => _e
-  nil
-end
+require 'legion/extensions/transport'
+require 'legion/llm/transport/exchanges/metering'
+require 'legion/llm/transport/exchanges/audit'
 
 module Legion
   module Extensions
     module Llm
       module Ledger
         module Transport
-          extend Legion::Extensions::Transport if Legion::Extensions.const_defined?(:Transport, false)
+          extend Legion::Extensions::Transport
 
           def self.additional_e_to_q
             [

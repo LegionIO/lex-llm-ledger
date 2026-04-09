@@ -1,15 +1,18 @@
 # Changelog
 
-## [0.1.6] - 2026-04-09
+## [0.1.7] - 2026-04-09
 
 ### Changed
 - Rename module namespace from `Legion::Extensions::LLM::Ledger` to `Legion::Extensions::Llm::Ledger` for framework const_get compatibility
 - Add legion-llm dependency to gemspec
 - Use legion-llm exchange classes (Legion::LLM::Transport::Exchanges::Metering, ::Audit) instead of local duplicates
 - Remove local exchange files in favor of legion-llm originals
+- Transport requires legion-llm exchanges with LoadError rescue in entry point
+- Transport extend without const_defined? guard (loaded after Core is available)
 
 ### Fixed
 - Transport additional_e_to_q uses `from:`/`to:`/`routing_key:` keys matching framework bind_e_to_q contract
+- Entry point requires wrapped in rescue to prevent silent load failures
 
 ## [0.1.4] - 2026-04-09
 
