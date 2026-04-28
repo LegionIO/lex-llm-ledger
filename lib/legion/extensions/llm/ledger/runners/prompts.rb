@@ -8,7 +8,8 @@ module Legion
           module Prompts
             extend self
 
-            def write_prompt_record(payload, metadata = {})
+            def write_prompt_record(payload = nil, metadata = {}, **message)
+              payload, metadata = normalize_runner_args(payload, metadata, message)
               headers = metadata[:headers] || {}
               props   = metadata[:properties] || {}
 
@@ -33,6 +34,10 @@ module Legion
             end
 
             private
+
+            def normalize_runner_args(payload, metadata, message)
+              Helpers::SubscriptionMessage.runner_args(payload, metadata, message)
+            end
 
             def build_prompt_record(body, ctx, props, headers, expires_at)
               routing = body[:routing] || {}

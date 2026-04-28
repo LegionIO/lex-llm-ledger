@@ -76,6 +76,15 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Tools do
       expect(row[:result_json]).to include('main.rb')
     end
 
+    it 'accepts subscription keyword envelopes with payload and metadata' do
+      result = described_class.write_tool_record(payload: decrypted_body, metadata: metadata)
+
+      expect(result).to eq({ result: :ok })
+      row = Legion::Data::DB[:tool_records].first
+      expect(row[:message_id]).to eq('audit_tool_abc123')
+      expect(row[:correlation_id]).to eq('req_abc')
+    end
+
     it 'stores null error_json when no error' do
       described_class.write_tool_record(decrypted_body, metadata)
       row = Legion::Data::DB[:tool_records].first

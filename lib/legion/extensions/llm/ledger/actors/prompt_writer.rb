@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'legion/extensions/actors/subscription'
+require_relative '../helpers/subscription_message'
 
 module Legion
   module Extensions
@@ -16,6 +17,10 @@ module Legion
 
             def use_runner?
               false
+            end
+
+            def process_message(message, metadata, delivery_info)
+              Helpers::SubscriptionMessage.decode_payload(message, metadata, delivery_info)
             end
           end
         end

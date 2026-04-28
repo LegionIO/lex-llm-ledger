@@ -75,6 +75,15 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Prompts do
       expect(parsed_response['message']['content']).to eq('Hi there!')
     end
 
+    it 'accepts subscription keyword envelopes with payload and metadata' do
+      result = described_class.write_prompt_record(payload: decrypted_body, metadata: metadata)
+
+      expect(result).to eq({ result: :ok })
+      row = Legion::Data::DB[:prompt_records].first
+      expect(row[:message_id]).to eq('audit_prompt_abc123')
+      expect(row[:correlation_id]).to eq('req_abc')
+    end
+
     it 'returns duplicate on second insert' do
       described_class.write_prompt_record(decrypted_body, metadata)
       result = described_class.write_prompt_record(decrypted_body, metadata)

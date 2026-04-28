@@ -8,7 +8,8 @@ module Legion
           module Tools
             extend self
 
-            def write_tool_record(payload, metadata = {})
+            def write_tool_record(payload = nil, metadata = {}, **message)
+              payload, metadata = normalize_runner_args(payload, metadata, message)
               headers = metadata[:headers] || {}
               props   = metadata[:properties] || {}
 
@@ -34,6 +35,10 @@ module Legion
             end
 
             private
+
+            def normalize_runner_args(payload, metadata, message)
+              Helpers::SubscriptionMessage.runner_args(payload, metadata, message)
+            end
 
             def build_tool_record(body, ctx, tool, props, headers, expires_at)
               src    = tool[:source] || {}

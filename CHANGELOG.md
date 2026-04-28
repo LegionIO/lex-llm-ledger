@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.10] - 2026-04-27
+
+### Fixed
+- Decode encrypted prompt and tool audit subscription payloads with either string or symbol `iv` headers before dispatch
+- Preserve cleartext prompt and tool audit subscription payload handling when audit encryption is disabled
+- Preserve AMQP headers and properties when prompt and tool subscription actors call their ledger runners
+
 ## [0.1.9] - 2026-04-09
 
 ### Fixed
