@@ -10,17 +10,21 @@ require_relative 'ledger/runners/prompts'
 require_relative 'ledger/runners/tools'
 require_relative 'ledger/runners/usage_reporter'
 require_relative 'ledger/runners/provider_stats'
+require_relative 'ledger/runners/registry_availability'
 
 if Legion::Extensions.const_defined?(:Core, false)
   require_relative 'ledger/transport/exchanges/metering'
   require_relative 'ledger/transport/exchanges/audit'
+  require_relative 'ledger/transport/exchanges/registry'
   require_relative 'ledger/transport/queues/metering_write'
   require_relative 'ledger/transport/queues/audit_prompts'
   require_relative 'ledger/transport/queues/audit_tools'
+  require_relative 'ledger/transport/queues/registry_availability'
   require_relative 'ledger/transport/transport'
   require_relative 'ledger/actors/metering_writer'
   require_relative 'ledger/actors/prompt_writer'
   require_relative 'ledger/actors/tool_writer'
+  require_relative 'ledger/actors/registry_availability_writer'
   require_relative 'ledger/actors/spool_flush'
 end
 

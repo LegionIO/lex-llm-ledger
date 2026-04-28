@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.12] - 2026-04-28
+
+### Added
+- Persist provider-neutral `llm.registry` availability event envelopes for offering, worker, lane, model, runtime, capacity, and health diagnostics
+- Add ledger-owned passive `llm.registry` transport exchange, durable registry availability queue, and subscription actor
+
 ## [0.1.11] - 2026-04-28
 
 ### Fixed

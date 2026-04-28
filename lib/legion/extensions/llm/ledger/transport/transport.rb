@@ -3,6 +3,7 @@
 require 'legion/extensions/transport'
 require_relative 'exchanges/metering'
 require_relative 'exchanges/audit'
+require_relative 'exchanges/registry'
 
 module Legion
   module Extensions
@@ -27,6 +28,11 @@ module Legion
                 from:        Legion::Extensions::Llm::Ledger::Transport::Exchanges::Audit,
                 to:          Legion::Extensions::Llm::Ledger::Transport::Queues::AuditTools,
                 routing_key: 'audit.tool.#'
+              },
+              {
+                from:        Legion::Extensions::Llm::Ledger::Transport::Exchanges::Registry,
+                to:          Legion::Extensions::Llm::Ledger::Transport::Queues::RegistryAvailability,
+                routing_key: '#'
               }
             ]
           end

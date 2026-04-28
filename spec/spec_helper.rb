@@ -88,14 +88,19 @@ require 'legion/extensions/llm/ledger/runners/prompts'
 require 'legion/extensions/llm/ledger/runners/tools'
 require 'legion/extensions/llm/ledger/runners/usage_reporter'
 require 'legion/extensions/llm/ledger/runners/provider_stats'
+require 'legion/extensions/llm/ledger/runners/registry_availability'
 require 'legion/extensions/llm/ledger/transport/exchanges/metering'
 require 'legion/extensions/llm/ledger/transport/exchanges/audit'
+require 'legion/extensions/llm/ledger/transport/exchanges/registry'
 require 'legion/extensions/llm/ledger/transport/queues/metering_write'
 require 'legion/extensions/llm/ledger/transport/queues/audit_prompts'
 require 'legion/extensions/llm/ledger/transport/queues/audit_tools'
+require 'legion/extensions/llm/ledger/transport/queues/registry_availability'
+require 'legion/extensions/llm/ledger/transport/transport'
 require 'legion/extensions/llm/ledger/actors/metering_writer'
 require 'legion/extensions/llm/ledger/actors/prompt_writer'
 require 'legion/extensions/llm/ledger/actors/tool_writer'
+require 'legion/extensions/llm/ledger/actors/registry_availability_writer'
 require 'legion/extensions/llm/ledger/actors/spool_flush'
 
 RSpec.configure do |config|
@@ -109,5 +114,6 @@ RSpec.configure do |config|
     Legion::Data::DB[:metering_records].delete
     Legion::Data::DB[:prompt_records].delete
     Legion::Data::DB[:tool_records].delete
+    Legion::Data::DB[:registry_availability_records].delete
   end
 end
