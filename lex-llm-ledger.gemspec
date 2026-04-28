@@ -30,10 +30,10 @@ Gem::Specification.new do |spec|
 
   spec.add_dependency 'legion-data',      '>= 1.6'
   spec.add_dependency 'legion-json',      '>= 1.2'
-  spec.add_dependency 'legion-llm',       '>= 0.6'
   spec.add_dependency 'legion-logging',   '>= 1.3'
   spec.add_dependency 'legion-settings',  '>= 1.3'
   spec.add_dependency 'legion-transport', '>= 1.4'
+  spec.add_dependency 'lex-llm',          '>= 0.1.5'
 
   spec.add_development_dependency 'rspec'
   spec.add_development_dependency 'rubocop'

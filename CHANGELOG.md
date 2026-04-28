@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.11] - 2026-04-28
+
+### Fixed
+- Replace the retired `legion-llm` runtime dependency with `lex-llm`
+- Define ledger-owned passive `llm.metering` and `llm.audit` exchange classes for transport bindings
+
 ## [0.1.10] - 2026-04-27
 
 ### Fixed
