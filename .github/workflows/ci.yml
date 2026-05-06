@@ -3,8 +3,6 @@ on:
   push:
     branches: [main]
   pull_request:
-  schedule:
-    - cron: '0 9 * * 1'
 
 jobs:
   ci:
@@ -21,10 +19,6 @@ jobs:
 
   dependency-review:
     uses: LegionIO/.github/.github/workflows/dependency-review.yml@main
-
-  stale:
-    if: github.event_name == 'schedule'
-    uses: LegionIO/.github/.github/workflows/stale.yml@main
 
   release:
     needs: [ci, excluded-files]
