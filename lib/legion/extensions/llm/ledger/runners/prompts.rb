@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../helpers/caller_identity'
+
 module Legion
   module Extensions
     module Llm
@@ -42,8 +44,10 @@ module Legion
               tokens  = body[:tokens]  || {}
               cost    = body[:cost]    || {}
               caller_raw = body[:caller] || {}
-              caller     = caller_raw[:requested_by] || caller_raw
               identity   = body[:identity] || {}
+              caller_identity = Helpers::CallerIdentity.normalize(
+                caller_raw: caller_raw, identity: identity, headers: headers
+              )
               agent = body[:agent] || {}
               cls     = body[:classification] || {}
               quality = body[:quality] || {}
@@ -71,10 +75,8 @@ module Legion
                 output_tokens:          (tokens[:output] || tokens[:output_tokens]).to_i,
                 total_tokens:           (tokens[:total] || tokens[:total_tokens]).to_i,
                 cost_usd:               cost[:estimated_usd].to_f,
-                caller_identity:        caller[:identity] || identity[:identity] || headers['x-legion-caller-identity'] ||
-                  (caller[:extension] && "extension:#{caller[:extension]}"),
-                caller_type:            caller[:type] || identity[:type] || headers['x-legion-caller-type'] ||
-                  (caller[:extension] && 'extension'),
+                caller_identity:        caller_identity[:identity],
+                caller_type:            caller_identity[:type],
                 agent_id:               agent[:id],
                 task_id:                agent[:task_id],
                 classification_level:   cls[:level] || headers['x-legion-classification'],
@@ -97,9 +99,20 @@ module Legion
             def official_prompt_payload(body, ctx, props, headers, expires_at)
               body.merge(
                 official_context_payload(body, ctx, props, headers),
+                official_identity_payload(body, headers),
                 official_routing_payload(body, headers),
                 official_compliance_payload(body, headers, expires_at)
               )
+            end
+
+            def official_identity_payload(body, headers)
+              identity = Helpers::CallerIdentity.normalize(
+                caller_raw: body[:caller], identity: body[:identity], headers: headers
+              )
+              {
+                caller_identity: identity[:identity],
+                caller_type:     identity[:type]
+              }.compact
             end
 
             def official_context_payload(body, ctx, props, headers)

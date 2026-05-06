@@ -104,6 +104,23 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Tools do
       expect(row[:tool_name]).to eq('list_files')
     end
 
+    it 'stores namespaced caller ids instead of ambiguous display identities' do
+      decrypted_body[:caller] = {
+        requested_by: {
+          id:       'system:system',
+          identity: 'system',
+          type:     'service'
+        }
+      }
+      metadata[:headers]['x-legion-identity'] = 'system:system'
+      metadata[:headers]['x-legion-caller-type'] = 'service'
+
+      described_class.write_tool_record(decrypted_body, metadata)
+
+      row = Legion::Data.connection[:llm_tool_records].first
+      expect(row[:caller_identity]).to eq('system:system')
+    end
+
     it 'applies PHI TTL cap' do
       metadata[:headers]['x-legion-contains-phi'] = 'true'
       described_class.write_tool_record(decrypted_body, metadata)

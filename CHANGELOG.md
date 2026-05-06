@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.1] - 2026-05-06
+
+### Fixed
+- Preserve namespaced caller identities from current LLM audit and metering envelopes instead of storing ambiguous display identities such as `system`.
+
 ## [0.2.0] - 2026-05-06
 
 ### Changed

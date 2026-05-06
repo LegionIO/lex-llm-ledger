@@ -101,5 +101,46 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Metering do
       row = Legion::Data.connection[:llm_message_inference_metrics].first
       expect(row[:thinking_tokens]).to eq(0)
     end
+
+    it 'normalizes caller identity from namespaced ids and current transport headers' do
+      payload[:caller] = {
+        requested_by: {
+          id:       'system:system',
+          identity: 'system',
+          type:     'service'
+        }
+      }
+      metadata[:headers] = {
+        'x-legion-identity'    => 'system:system',
+        'x-legion-caller-type' => 'service'
+      }
+
+      official_payload = described_class.send(
+        :official_metering_payload,
+        payload,
+        payload[:message_context],
+        metadata[:properties],
+        metadata[:headers]
+      )
+
+      expect(official_payload[:caller_identity]).to eq('system:system')
+      expect(official_payload[:caller_type]).to eq('service')
+    end
+
+    it 'prefers normalized event identity over ambiguous display identity' do
+      payload[:caller] = { requested_by: { identity: 'system', type: 'service' } }
+      payload[:identity] = { identity: 'system:system', type: 'service' }
+
+      official_payload = described_class.send(
+        :official_metering_payload,
+        payload,
+        payload[:message_context],
+        metadata[:properties],
+        metadata[:headers]
+      )
+
+      expect(official_payload[:caller_identity]).to eq('system:system')
+      expect(official_payload[:caller_type]).to eq('service')
+    end
   end
 end

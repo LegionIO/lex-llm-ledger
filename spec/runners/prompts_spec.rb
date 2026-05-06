@@ -119,6 +119,29 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Prompts do
       expect(row[:expires_at]).to be_nil
     end
 
+    it 'normalizes caller identity from namespaced ids and current transport headers' do
+      decrypted_body[:caller] = {
+        requested_by: {
+          id:       'system:system',
+          identity: 'system',
+          type:     'service'
+        }
+      }
+      metadata[:headers]['x-legion-identity'] = 'system:system'
+      metadata[:headers]['x-legion-caller-type'] = 'service'
+
+      official_payload = described_class.send(
+        :official_context_payload,
+        decrypted_body,
+        decrypted_body[:message_context],
+        metadata[:properties],
+        metadata[:headers]
+      ).merge(described_class.send(:official_identity_payload, decrypted_body, metadata[:headers]))
+
+      expect(official_payload[:caller_identity]).to eq('system:system')
+      expect(official_payload[:caller_type]).to eq('service')
+    end
+
     it 'propagates DecryptionUnavailable (NACK for requeue)' do
       metadata[:properties][:content_encoding] = 'encrypted/cs'
       expect do

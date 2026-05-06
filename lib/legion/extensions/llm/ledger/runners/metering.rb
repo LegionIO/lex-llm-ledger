@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../helpers/caller_identity'
+
 module Legion
   module Extensions
     module Llm
@@ -38,11 +40,13 @@ module Legion
               Helpers::SubscriptionMessage.runner_args(payload, metadata, message)
             end
 
-            def build_metering_record(payload, ctx, props, headers) # rubocop:disable Metrics/CyclomaticComplexity
+            def build_metering_record(payload, ctx, props, headers)
               billing    = payload[:billing] || {}
               caller_raw = payload[:caller] || {}
-              caller     = caller_raw[:requested_by] || caller_raw
               identity   = payload[:identity] || {}
+              caller_identity = Helpers::CallerIdentity.normalize(
+                caller_raw: caller_raw, identity: identity, headers: headers
+              )
 
               {
                 message_id:        props[:message_id] || payload[:message_id],
@@ -71,19 +75,23 @@ module Legion
                 routing_reason:    payload[:routing_reason],
                 cost_center:       billing[:cost_center],
                 budget_id:         billing[:budget_id],
-                caller_identity:   resolve_caller_identity(caller, identity, headers),
-                caller_type:       caller[:type] || identity[:type] || headers['x-legion-caller-type'] || (caller[:extension] && 'extension'),
+                caller_identity:   caller_identity[:identity],
+                caller_type:       caller_identity[:type],
                 recorded_at:       payload[:recorded_at],
                 inserted_at:       Time.now.utc
               }
             end
 
             def resolve_caller_identity(caller, identity, headers)
-              caller[:identity] || identity[:identity] || headers['x-legion-caller-identity'] ||
-                (caller[:extension] && "extension:#{caller[:extension]}")
+              Helpers::CallerIdentity.normalize(
+                caller_raw: caller, identity: identity, headers: headers
+              )[:identity]
             end
 
             def official_metering_payload(payload, ctx, props, headers)
+              identity = Helpers::CallerIdentity.normalize(
+                caller_raw: payload[:caller], identity: payload[:identity], headers: headers
+              )
               payload.merge(
                 message_id:        props[:message_id] || payload[:message_id] || ctx[:message_id],
                 correlation_id:    props[:correlation_id] || payload[:correlation_id],
@@ -94,7 +102,9 @@ module Legion
                 provider:          payload[:provider] || headers['x-legion-llm-provider'],
                 provider_instance: payload[:provider_instance] || payload[:instance],
                 model_id:          payload[:model_id] || headers['x-legion-llm-model'],
-                tier:              payload[:tier] || headers['x-legion-llm-tier']
+                tier:              payload[:tier] || headers['x-legion-llm-tier'],
+                caller_identity:   identity[:identity],
+                caller_type:       identity[:type]
               )
             end
 

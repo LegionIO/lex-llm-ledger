@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../helpers/caller_identity'
+
 module Legion
   module Extensions
     module Llm
@@ -49,8 +51,10 @@ module Legion
               ts       = body[:timestamps] || {}
               tracing    = body[:tracing] || {}
               caller_raw = body[:caller] || {}
-              caller     = caller_raw[:requested_by] || caller_raw
               identity   = body[:identity] || {}
+              caller_identity = Helpers::CallerIdentity.normalize(
+                caller_raw: caller_raw, identity: identity, headers: headers
+              )
               agent = body[:agent] || {}
 
               {
@@ -71,8 +75,7 @@ module Legion
                 arguments_json:       Legion::JSON.dump(tool[:arguments] || {}), # rubocop:disable Legion/HelperMigration/DirectJson
                 result_json:          Legion::JSON.dump(tool[:result] || body[:result]), # rubocop:disable Legion/HelperMigration/DirectJson
                 error_json:           Legion::JSON.dump(tool[:error] || body[:error]), # rubocop:disable Legion/HelperMigration/DirectJson
-                caller_identity:      caller[:identity] || identity[:identity] || headers['x-legion-caller-identity'] ||
-                  (caller[:extension] && "extension:#{caller[:extension]}"),
+                caller_identity:      caller_identity[:identity],
                 agent_id:             agent[:id],
                 classification_level: cls[:level] || headers['x-legion-classification'],
                 contains_phi:         Helpers::Queries.phi_flag?(cls, headers),
