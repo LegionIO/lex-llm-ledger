@@ -19,22 +19,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Actor::RegistryAvailabilityWrite
     expect(described_class.superclass).to eq(Legion::Extensions::Actors::Subscription)
   end
 
-  it 'decodes provider-neutral registry event JSON' do
-    metadata = Struct.new(:content_encoding, :content_type, :headers, :message_id, :correlation_id).new(
-      'identity',
-      'application/json',
-      {},
-      'registry_event_123',
-      'evt-123'
-    )
-    delivery_info = { routing_key: 'offering.available' }
-    payload = '{"event_id":"evt-123","event_type":"offering_available","occurred_at":"2026-04-28T14:30:15Z"}'
-
-    message = actor.process_message(payload, metadata, delivery_info)
-
-    expect(message[:payload][:event_id]).to eq('evt-123')
-    expect(message[:payload][:event_type]).to eq('offering_available')
-    expect(message[:metadata][:properties][:message_id]).to eq('registry_event_123')
-    expect(message[:metadata][:properties][:routing_key]).to eq('offering.available')
+  it 'uses the RegistryAvailability queue' do
+    expect(actor.queue).to eq(Legion::Extensions::Llm::Ledger::Transport::Queues::RegistryAvailability)
   end
 end

@@ -19,8 +19,8 @@ module Legion
               false
             end
 
-            def process_message(message, metadata, delivery_info)
-              Helpers::SubscriptionMessage.decode_payload(message, metadata, delivery_info)
+            def queue
+              Legion::Extensions::Llm::Ledger::Transport::Queues::AuditPrompts
             end
           end
         end

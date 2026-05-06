@@ -47,7 +47,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::RegistryAvailability do
       result = described_class.write_registry_availability_record(payload, metadata)
       expect(result).to eq({ result: :ok })
 
-      row = Legion::Data::DB[:registry_availability_records].first
+      row = Legion::Data.connection[:llm_registry_availability_records].first
       expect(row[:event_id]).to eq('evt-123')
       expect(row[:message_id]).to eq('registry_event_123')
       expect(row[:correlation_id]).to eq('evt-123')
@@ -78,7 +78,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::RegistryAvailability do
       result = described_class.write_registry_availability_record(payload: payload, metadata: metadata)
 
       expect(result).to eq({ result: :ok })
-      row = Legion::Data::DB[:registry_availability_records].first
+      row = Legion::Data.connection[:llm_registry_availability_records].first
       expect(row[:event_id]).to eq('evt-123')
       expect(row[:message_id]).to eq('registry_event_123')
     end
@@ -88,12 +88,12 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::RegistryAvailability do
       result = described_class.write_registry_availability_record(payload, metadata)
 
       expect(result).to eq({ result: :duplicate })
-      expect(Legion::Data::DB[:registry_availability_records].count).to eq(1)
+      expect(Legion::Data.connection[:llm_registry_availability_records].count).to eq(1)
     end
 
     it 'returns error without raising when database persistence fails' do
-      allow(Legion::Data::DB).to receive(:[]).with(:registry_availability_records).and_raise(Sequel::DatabaseError,
-                                                                                             'database down')
+      allow(Legion::Data.connection).to receive(:[]).with(:llm_registry_availability_records).and_raise(Sequel::DatabaseError,
+                                                                                                        'database down')
 
       expect(described_class.write_registry_availability_record(payload, metadata)).to eq(
         { result: :error, error: 'database down' }

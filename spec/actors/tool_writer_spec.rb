@@ -18,4 +18,8 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Actor::ToolWriter do
   it 'inherits from Subscription' do
     expect(described_class.superclass).to eq(Legion::Extensions::Actors::Subscription)
   end
+
+  it 'uses the AuditTools queue' do
+    expect(actor.queue).to eq(Legion::Extensions::Llm::Ledger::Transport::Queues::AuditTools)
+  end
 end

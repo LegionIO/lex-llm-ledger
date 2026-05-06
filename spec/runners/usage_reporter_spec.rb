@@ -3,34 +3,34 @@
 RSpec.describe Legion::Extensions::Llm::Ledger::Runners::UsageReporter do
   def insert_metering(overrides = {})
     defaults = {
-      message_id:      "meter_#{SecureRandom.hex(4)}",
-      correlation_id:  'req_abc',
-      conversation_id: 'conv_123',
-      message_id_ctx:  'msg_005',
-      request_id:      'req_abc',
-      request_type:    'chat',
-      tier:            'fleet',
-      provider:        'ollama',
-      model_id:        'qwen3.5:27b',
-      node_id:         'laptop-matt-01',
-      worker_id:       'gpu-h100-01',
-      input_tokens:    42,
-      output_tokens:   28,
-      thinking_tokens: 0,
-      total_tokens:    70,
-      latency_ms:      1245,
-      wall_clock_ms:   1300,
-      cost_usd:        0.05,
-      recorded_at:     '2026-04-08T14:30:01.300Z',
-      inserted_at:     Time.now.utc
+      message_id:        "meter_#{SecureRandom.hex(4)}",
+      request_id:        "req_#{SecureRandom.hex(4)}",
+      conversation_id:   'conv_123',
+      operation:         'chat',
+      tier:              'fleet',
+      provider:          'ollama',
+      provider_instance: 'local',
+      model_id:          'qwen3.5:27b',
+      input_tokens:      42,
+      output_tokens:     28,
+      thinking_tokens:   0,
+      total_tokens:      70,
+      latency_ms:        1245,
+      wall_clock_ms:     1300,
+      cost_usd:          0.05,
+      recorded_at:       Time.now.utc,
+      billing:           {
+        cost_center: 'engineering-platform',
+        budget_id:   'budget_q1'
+      }
     }
-    Legion::Data::DB[:metering_records].insert(defaults.merge(overrides))
+    Legion::Extensions::Llm::Ledger::Writers::OfficialMeteringWriter.write(defaults.merge(overrides))
   end
 
   describe '.summary' do
-    it 'returns aggregate data for recent records' do
+    it 'returns aggregate data for recent official metric records' do
       insert_metering
-      insert_metering(message_id: 'meter_002', total_tokens: 100, cost_usd: 0.10)
+      insert_metering(total_tokens: 100, cost_usd: 0.10)
 
       results = described_class.summary(period: 'day')
       expect(results.length).to eq(1)
@@ -38,19 +38,20 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::UsageReporter do
       expect(results.first[:grand_total_tokens]).to eq(170)
     end
 
-    it 'groups by provider when requested' do
-      insert_metering(provider: 'ollama')
-      insert_metering(message_id: 'meter_002', provider: 'bedrock')
+    it 'groups by provider_instance when requested' do
+      insert_metering(provider_instance: 'local')
+      insert_metering(provider_instance: 'apollo')
 
-      results = described_class.summary(period: 'day', group_by: 'provider')
+      results = described_class.summary(period: 'day', group_by: 'provider_instance')
       expect(results.length).to eq(2)
+      expect(results.map { |row| row[:provider_instance] }).to contain_exactly('local', 'apollo')
     end
   end
 
   describe '.worker_usage' do
-    it 'returns only records for the specified worker' do
-      insert_metering(worker_id: 'gpu-h100-01')
-      insert_metering(message_id: 'meter_002', worker_id: 'gpu-h100-02')
+    it 'treats worker_id as provider_instance for official schema compatibility' do
+      insert_metering(provider_instance: 'gpu-h100-01')
+      insert_metering(provider_instance: 'gpu-h100-02')
 
       results = described_class.worker_usage(worker_id: 'gpu-h100-01', period: 'day')
       expect(results.length).to eq(1)
@@ -59,9 +60,9 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::UsageReporter do
   end
 
   describe '.budget_check' do
-    it 'returns correct budget status' do
-      insert_metering(budget_id: 'budget_q1', cost_usd: 3.0)
-      insert_metering(message_id: 'meter_002', budget_id: 'budget_q1', cost_usd: 5.0)
+    it 'returns correct budget status from official metrics budget_key' do
+      insert_metering(cost_usd: 3.0)
+      insert_metering(cost_usd: 5.0)
 
       result = described_class.budget_check(budget_id: 'budget_q1', budget_usd: 10.0, period: 'month')
       expect(result[:spent_usd]).to eq(8.0)
@@ -71,7 +72,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::UsageReporter do
     end
 
     it 'detects exceeded budget' do
-      insert_metering(budget_id: 'budget_q1', cost_usd: 11.0)
+      insert_metering(cost_usd: 11.0)
 
       result = described_class.budget_check(budget_id: 'budget_q1', budget_usd: 10.0, period: 'month')
       expect(result[:exceeded]).to be true
@@ -79,14 +80,14 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::UsageReporter do
   end
 
   describe '.top_consumers' do
-    it 'returns top N consumers by cost' do
-      insert_metering(node_id: 'node-a', cost_usd: 5.0)
-      insert_metering(message_id: 'meter_002', node_id: 'node-b', cost_usd: 10.0)
-      insert_metering(message_id: 'meter_003', node_id: 'node-c', cost_usd: 1.0)
+    it 'returns top N provider instances by cost' do
+      insert_metering(provider_instance: 'node-a', cost_usd: 5.0)
+      insert_metering(provider_instance: 'node-b', cost_usd: 10.0)
+      insert_metering(provider_instance: 'node-c', cost_usd: 1.0)
 
-      results = described_class.top_consumers(limit: 2, group_by: 'node_id', period: 'day')
+      results = described_class.top_consumers(limit: 2, group_by: 'provider_instance', period: 'day')
       expect(results.length).to eq(2)
-      expect(results.first[:node_id]).to eq('node-b')
+      expect(results.first[:provider_instance]).to eq('node-b')
     end
   end
 end

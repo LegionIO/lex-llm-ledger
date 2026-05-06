@@ -14,12 +14,13 @@ module Legion
 
               body = symbolize(payload)
               record = build_registry_availability_record(body, props)
-              ::Legion::Data::DB[:registry_availability_records].insert(record)
+              ::Legion::Data.connection[:llm_registry_availability_records].insert(record)
               { result: :ok }
-            rescue Sequel::UniqueConstraintViolation => _e
+            rescue Sequel::UniqueConstraintViolation => e
+              log.debug("write_registry_availability_record duplicate: #{e.message}")
               { result: :duplicate }
             rescue StandardError => e
-              Legion::Logging.error("[lex-llm-ledger] write_registry_availability_record failed: #{e.message}") # rubocop:disable Legion/HelperMigration/DirectLogging
+              log.error("write_registry_availability_record failed: #{e.message}")
               { result: :error, error: e.message }
             end
 
@@ -99,6 +100,9 @@ module Legion
                 value
               end
             end
+
+            include Legion::Extensions::Helpers::Lex if Legion::Extensions.const_defined?(:Helpers, false) &&
+                                                        Legion::Extensions::Helpers.const_defined?(:Lex, false)
           end
         end
       end

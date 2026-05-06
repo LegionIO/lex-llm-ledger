@@ -12,7 +12,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Prompts do
         exchange_id:       'exch_005'
       },
       response_message_id: 'msg_006',
-      routing:             { provider: 'ollama', model: 'qwen3.5:27b', tier: 'fleet' },
+      routing:             { provider: 'ollama', model: 'qwen3.5:27b', tier: 'fleet', instance: 'local' },
       tokens:              { input: 42, output: 28, total: 70 },
       cost:                { estimated_usd: 0.0 },
       caller:              { requested_by: { identity: 'user:matt', type: 'user' } },
@@ -21,7 +21,8 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Prompts do
       quality:             { score: 85, band: 'good' },
       timestamps:          { returned: '2026-04-08T14:30:01.247Z', provider_end: '2026-04-08T14:30:01.245Z' },
       request:             { system: 'You are a helpful assistant.', messages: [{ role: 'user', content: 'Hello' }] },
-      response:            { message: { role: 'assistant', content: 'Hi there!' }, stop: { reason: 'end_turn' } }
+      response:            { message: { role: 'assistant', content: 'Hi there!' }, stop: { reason: 'end_turn' } },
+      response_thinking:   { content: 'internal chain', enabled: true, config: { budget_tokens: 128 } }
     }
   end
 
@@ -42,72 +43,79 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Prompts do
   end
 
   describe '.write_prompt_record' do
-    it 'inserts a record and returns ok' do
+    it 'inserts official lifecycle rows and returns ok' do
       result = described_class.write_prompt_record(decrypted_body, metadata)
-      expect(result).to eq({ result: :ok })
+      expect(result).to include(result: :ok)
 
-      row = Legion::Data::DB[:prompt_records].first
-      expect(row[:message_id]).to eq('audit_prompt_abc123')
-      expect(row[:correlation_id]).to eq('req_abc')
-      expect(row[:conversation_id]).to eq('conv_123')
-      expect(row[:response_message_id]).to eq('msg_006')
-      expect(row[:provider]).to eq('ollama')
-      expect(row[:model_id]).to eq('qwen3.5:27b')
-      expect(row[:tier]).to eq('fleet')
-      expect(row[:request_type]).to eq('chat')
-      expect(row[:input_tokens]).to eq(42)
-      expect(row[:output_tokens]).to eq(28)
-      expect(row[:total_tokens]).to eq(70)
-      expect(row[:caller_identity]).to eq('user:matt')
-      expect(row[:caller_type]).to eq('user')
-      expect(row[:agent_id]).to eq('gaia')
-      expect(row[:quality_score]).to eq(85)
-      expect(row[:quality_band]).to eq('good')
-      expect(row[:recorded_at]).to eq('2026-04-08T14:30:01.247Z')
+      conversation = Legion::Data.connection[:llm_conversations].first
+      request = Legion::Data.connection[:llm_message_inference_requests].first
+      response = Legion::Data.connection[:llm_message_inference_responses].first
+      metric = Legion::Data.connection[:llm_message_inference_metrics].first
+
+      expect(conversation[:uuid]).to eq('conv_123')
+      expect(request[:request_ref]).to eq('req_abc')
+      expect(request[:correlation_id]).to eq('req_abc')
+      expect(request[:operation]).to eq('chat')
+      expect(response[:provider]).to eq('ollama')
+      expect(response[:provider_instance]).to eq('local')
+      expect(response[:model_key]).to eq('qwen3.5:27b')
+      expect(response[:dispatch_path]).to eq('fleet')
+      expect(metric[:input_tokens]).to eq(42)
+      expect(metric[:output_tokens]).to eq(28)
+      expect(metric[:total_tokens]).to eq(70)
     end
 
-    it 'stores request_json and response_json as JSON strings' do
+    it 'stores request, visible response, and thinking as structured JSON' do
       described_class.write_prompt_record(decrypted_body, metadata)
-      row = Legion::Data::DB[:prompt_records].first
-      parsed_request = JSON.parse(row[:request_json])
+      request = Legion::Data.connection[:llm_message_inference_requests].first
+      response = Legion::Data.connection[:llm_message_inference_responses].first
+
+      parsed_request = JSON.parse(request[:request_json])
       expect(parsed_request['system']).to eq('You are a helpful assistant.')
-      parsed_response = JSON.parse(row[:response_json])
+      parsed_response = JSON.parse(response[:response_json])
       expect(parsed_response['message']['content']).to eq('Hi there!')
+      parsed_thinking = JSON.parse(response[:response_thinking_json])
+      expect(parsed_thinking['content']).to eq('internal chain')
+      expect(parsed_thinking['config']['budget_tokens']).to eq(128)
     end
 
     it 'accepts subscription keyword envelopes with payload and metadata' do
       result = described_class.write_prompt_record(payload: decrypted_body, metadata: metadata)
 
-      expect(result).to eq({ result: :ok })
-      row = Legion::Data::DB[:prompt_records].first
-      expect(row[:message_id]).to eq('audit_prompt_abc123')
-      expect(row[:correlation_id]).to eq('req_abc')
+      expect(result).to include(result: :ok)
+      request = Legion::Data.connection[:llm_message_inference_requests].first
+      expect(request[:request_ref]).to eq('req_abc')
+      expect(request[:correlation_id]).to eq('req_abc')
     end
 
-    it 'returns duplicate on second insert' do
+    it 'is idempotent on second insert' do
       described_class.write_prompt_record(decrypted_body, metadata)
       result = described_class.write_prompt_record(decrypted_body, metadata)
-      expect(result).to eq({ result: :duplicate })
+
+      expect(result).to include(result: :ok)
+      expect(Legion::Data.connection[:llm_message_inference_requests].count).to eq(1)
+      expect(Legion::Data.connection[:llm_message_inference_responses].count).to eq(1)
+      expect(Legion::Data.connection[:llm_message_inference_metrics].count).to eq(1)
     end
 
     it 'sets contains_phi true from header' do
       metadata[:headers]['x-legion-contains-phi'] = 'true'
       described_class.write_prompt_record(decrypted_body, metadata)
-      row = Legion::Data::DB[:prompt_records].first
+      row = Legion::Data.connection[:llm_conversations].first
       expect(row[:contains_phi]).to be true
     end
 
     it 'applies PHI TTL cap when PHI flagged' do
       metadata[:headers]['x-legion-contains-phi'] = 'true'
       described_class.write_prompt_record(decrypted_body, metadata)
-      row = Legion::Data::DB[:prompt_records].first
+      row = Legion::Data.connection[:llm_conversations].first
       expect(row[:expires_at]).not_to be_nil
     end
 
     it 'sets nil expires_at for permanent non-PHI' do
       metadata[:headers]['x-legion-retention'] = 'permanent'
       described_class.write_prompt_record(decrypted_body, metadata)
-      row = Legion::Data::DB[:prompt_records].first
+      row = Legion::Data.connection[:llm_conversations].first
       expect(row[:expires_at]).to be_nil
     end
 

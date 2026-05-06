@@ -15,41 +15,48 @@ module Legion
               Legion::LLM::Metering.flush_spool
               { result: :ok }
             rescue StandardError => e
-              Legion::Logging.warn("[lex-llm-ledger] spool_flush failed: #{e.message}") # rubocop:disable Legion/HelperMigration/DirectLogging
+              log.warn("spool_flush failed: #{e.message}")
               { result: :error, error: e.message }
             end
 
-            def write_metering_record(payload, metadata = {})
-              ctx   = payload[:message_context] || {}
-              props = metadata[:properties] || {}
+            def write_metering_record(payload = nil, metadata = {}, **message)
+              log.unknown "write_metering_record => #{metadata}, payload: #{payload}, message: #{message}"
+              payload, metadata = normalize_runner_args(payload, metadata, message)
+              headers = Helpers::SubscriptionMessage.extract_headers(payload, metadata)
+              ctx     = payload[:message_context] || {}
+              props   = metadata[:properties] || {}
 
-              record = build_metering_record(payload, ctx, props)
-              ::Legion::Data::DB[:metering_records].insert(record)
-              { result: :ok }
-            rescue Sequel::UniqueConstraintViolation => _e
-              { result: :duplicate }
+              Writers::OfficialMeteringWriter.write(official_metering_payload(payload, ctx, props, headers))
             rescue StandardError => e
-              Legion::Logging.error("[lex-llm-ledger] write_metering_record failed: #{e.message}") # rubocop:disable Legion/HelperMigration/DirectLogging
+              log.error("write_metering_record failed: #{e.message}")
               { result: :error, error: e.message }
             end
 
             private
 
-            def build_metering_record(payload, ctx, props)
-              billing = payload[:billing] || {}
+            def normalize_runner_args(payload, metadata, message)
+              Helpers::SubscriptionMessage.runner_args(payload, metadata, message)
+            end
+
+            def build_metering_record(payload, ctx, props, headers) # rubocop:disable Metrics/CyclomaticComplexity
+              billing    = payload[:billing] || {}
+              caller_raw = payload[:caller] || {}
+              caller     = caller_raw[:requested_by] || caller_raw
+              identity   = payload[:identity] || {}
+
               {
-                message_id:        props[:message_id],
-                correlation_id:    props[:correlation_id],
-                conversation_id:   ctx[:conversation_id],
+                message_id:        props[:message_id] || payload[:message_id],
+                correlation_id:    props[:correlation_id] || payload[:correlation_id],
+                conversation_id:   ctx[:conversation_id] || payload[:conversation_id],
                 message_id_ctx:    ctx[:message_id],
                 parent_message_id: ctx[:parent_message_id],
                 message_seq:       ctx[:message_seq],
-                request_id:        ctx[:request_id],
+                request_id:        ctx[:request_id] || payload[:request_id],
                 exchange_id:       ctx[:exchange_id],
-                request_type:      payload[:request_type],
-                tier:              payload[:tier],
-                provider:          payload[:provider],
-                model_id:          payload[:model_id],
+                request_type:      payload[:request_type] || headers['x-legion-llm-request-type'],
+                tier:              payload[:tier]     || headers['x-legion-llm-tier'],
+                provider:          payload[:provider] || headers['x-legion-llm-provider'],
+                model_id:          payload[:model_id] || headers['x-legion-llm-model'],
                 node_id:           payload[:node_id],
                 worker_id:         payload[:worker_id],
                 agent_id:          payload[:agent_id],
@@ -64,10 +71,35 @@ module Legion
                 routing_reason:    payload[:routing_reason],
                 cost_center:       billing[:cost_center],
                 budget_id:         billing[:budget_id],
+                caller_identity:   resolve_caller_identity(caller, identity, headers),
+                caller_type:       caller[:type] || identity[:type] || headers['x-legion-caller-type'] || (caller[:extension] && 'extension'),
                 recorded_at:       payload[:recorded_at],
                 inserted_at:       Time.now.utc
               }
             end
+
+            def resolve_caller_identity(caller, identity, headers)
+              caller[:identity] || identity[:identity] || headers['x-legion-caller-identity'] ||
+                (caller[:extension] && "extension:#{caller[:extension]}")
+            end
+
+            def official_metering_payload(payload, ctx, props, headers)
+              payload.merge(
+                message_id:        props[:message_id] || payload[:message_id] || ctx[:message_id],
+                correlation_id:    props[:correlation_id] || payload[:correlation_id],
+                conversation_id:   ctx[:conversation_id] || payload[:conversation_id],
+                request_id:        ctx[:request_id] || payload[:request_id],
+                exchange_id:       ctx[:exchange_id] || payload[:exchange_id],
+                operation:         payload[:operation] || payload[:request_type] || headers['x-legion-llm-request-type'],
+                provider:          payload[:provider] || headers['x-legion-llm-provider'],
+                provider_instance: payload[:provider_instance] || payload[:instance],
+                model_id:          payload[:model_id] || headers['x-legion-llm-model'],
+                tier:              payload[:tier] || headers['x-legion-llm-tier']
+              )
+            end
+
+            include Legion::Extensions::Helpers::Lex if Legion::Extensions.const_defined?(:Helpers, false) &&
+                                                        Legion::Extensions::Helpers.const_defined?(:Lex, false)
           end
         end
       end

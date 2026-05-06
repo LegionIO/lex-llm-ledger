@@ -64,8 +64,25 @@ module Legion
               end
             end
 
+            def extract_headers(payload, metadata)
+              explicit = metadata[:headers]
+              return explicit if explicit.is_a?(Hash) && explicit.any?
+              return {} unless payload.is_a?(Hash)
+
+              payload.each_with_object({}) do |(key, value), hdrs|
+                str = key.to_s
+                hdrs[str] = value if str.start_with?('x-legion-') || str == 'legion_protocol_version'
+              end
+            end
+
             def runner_args(payload, metadata, message)
-              message.key?(:payload) ? [message[:payload], message[:metadata] || {}] : [payload, metadata]
+              if message.key?(:payload)
+                [message[:payload], message[:metadata] || {}]
+              elsif payload.nil? && message.any?
+                [message, metadata]
+              else
+                [payload, metadata]
+              end
             end
 
             def routing_key(delivery_info)

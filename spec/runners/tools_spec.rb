@@ -52,7 +52,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Tools do
       result = described_class.write_tool_record(decrypted_body, metadata)
       expect(result).to eq({ result: :ok })
 
-      row = Legion::Data::DB[:tool_records].first
+      row = Legion::Data.connection[:llm_tool_records].first
       expect(row[:message_id]).to eq('audit_tool_abc123')
       expect(row[:correlation_id]).to eq('req_abc')
       expect(row[:conversation_id]).to eq('conv_123')
@@ -70,7 +70,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Tools do
 
     it 'serializes arguments and result as JSON' do
       described_class.write_tool_record(decrypted_body, metadata)
-      row = Legion::Data::DB[:tool_records].first
+      row = Legion::Data.connection[:llm_tool_records].first
       parsed_args = JSON.parse(row[:arguments_json])
       expect(parsed_args['path']).to eq('/src')
       expect(row[:result_json]).to include('main.rb')
@@ -80,14 +80,14 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Tools do
       result = described_class.write_tool_record(payload: decrypted_body, metadata: metadata)
 
       expect(result).to eq({ result: :ok })
-      row = Legion::Data::DB[:tool_records].first
+      row = Legion::Data.connection[:llm_tool_records].first
       expect(row[:message_id]).to eq('audit_tool_abc123')
       expect(row[:correlation_id]).to eq('req_abc')
     end
 
     it 'stores null error_json when no error' do
       described_class.write_tool_record(decrypted_body, metadata)
-      row = Legion::Data::DB[:tool_records].first
+      row = Legion::Data.connection[:llm_tool_records].first
       expect(row[:error_json]).to eq('null')
     end
 
@@ -100,14 +100,14 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Tools do
     it 'uses header fallback when tool_call.name is absent' do
       decrypted_body[:tool_call].delete(:name)
       described_class.write_tool_record(decrypted_body, metadata)
-      row = Legion::Data::DB[:tool_records].first
+      row = Legion::Data.connection[:llm_tool_records].first
       expect(row[:tool_name]).to eq('list_files')
     end
 
     it 'applies PHI TTL cap' do
       metadata[:headers]['x-legion-contains-phi'] = 'true'
       described_class.write_tool_record(decrypted_body, metadata)
-      row = Legion::Data::DB[:tool_records].first
+      row = Legion::Data.connection[:llm_tool_records].first
       expect(row[:contains_phi]).to be true
       expect(row[:expires_at]).not_to be_nil
     end
