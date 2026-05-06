@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'decryption'
+require_relative 'json'
 
 module Legion
   module Extensions
@@ -57,11 +58,7 @@ module Legion
             def parse_payload(payload, properties)
               return payload unless properties[:content_type] == 'application/json'
 
-              if json_load_keyword?(:symbolize_keys)
-                Legion::JSON.load(payload, symbolize_keys: true) # rubocop:disable Legion/HelperMigration/DirectJson
-              else
-                Legion::JSON.load(payload, symbolize_names: true) # rubocop:disable Legion/HelperMigration/DirectJson
-              end
+              Json.load(payload)
             end
 
             def extract_headers(payload, metadata)
@@ -117,12 +114,8 @@ module Legion
               end
             end
 
-            def json_load_keyword?(keyword)
-              Legion::JSON.method(:load).parameters.any? { |type, name| type == :key && name == keyword }
-            end
-
             private_class_method :metadata_headers, :metadata_properties, :decrypt_payload, :parse_payload,
-                                 :routing_key, :metadata_value, :metadata_key?, :symbolize, :json_load_keyword?
+                                 :routing_key, :metadata_value, :metadata_key?, :symbolize
           end
         end
       end

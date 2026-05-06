@@ -75,17 +75,19 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Helpers::Retention do
     end
 
     context 'with settings overrides' do
-      before do
-        stub_const('Legion::Settings', Class.new do
-          def self.respond_to?(method, *args)
-            method == :dig || super
-          end
-
-          def self.dig(*keys)
-            settings = { llm_ledger: { retention: { default_days: 60, phi_ttl_days: 14 } } }
-            keys.reduce(settings) { |h, k| h.is_a?(Hash) ? h[k] : nil }
-          end
-        end)
+      around do |example|
+        Legion::Settings.with_overlay(
+          extensions: {
+            llm: {
+              ledger: {
+                retention: {
+                  default_days: 60,
+                  phi_ttl_days: 14
+                }
+              }
+            }
+          }
+        ) { example.run }
       end
 
       it 'uses configured default_days' do

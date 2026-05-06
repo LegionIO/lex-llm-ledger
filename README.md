@@ -115,8 +115,35 @@ Ledger is not on the LLM execution critical path. If the database is unavailable
 
 - `legion-data` >= 1.8.0 (official LLM lifecycle schema)
 - `legion-json` >= 1.2 (JSON serialization)
+- `legion-logging` >= 1.3 (structured exception logging)
+- `legion-settings` >= 1.3 (extension-scoped retention settings)
 - `legion-transport` >= 1.4.14 (AMQP transport)
 - `legion-crypt` >= 1.5 (for decrypting audit messages, optional at runtime)
+
+## Configuration
+
+Ledger runs with safe defaults and reads extension settings from
+`extensions.llm.ledger`:
+
+```json
+{
+  "extensions": {
+    "llm": {
+      "ledger": {
+        "retention": {
+          "default_days": 90,
+          "phi_ttl_days": 30
+        }
+      }
+    }
+  }
+}
+```
+
+`default_days` controls records with the `default` retention label. `phi_ttl_days`
+caps PHI records even when the event asks for longer or permanent retention.
+Encrypted audit messages must include an `iv` header; missing-IV messages are
+rejected as malformed encrypted audit records rather than retried.
 
 ## Usage
 

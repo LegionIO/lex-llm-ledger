@@ -3,29 +3,15 @@
 require 'simplecov'
 SimpleCov.start
 
+require 'legion/json'
+require 'legion/logging'
+Legion::Logging.setup(level: 'fatal', log_file: File::NULL, log_stdout: false, async: false)
+require 'legion/settings'
 require 'securerandom'
 require 'sequel'
 require_relative 'support/test_db'
 
 module Legion
-  module Logging
-    def self.error(_msg)   = nil
-    def self.warn(_msg)    = nil
-    def self.info(_msg)    = nil
-    def self.debug(_msg)   = nil
-    def self.unknown(_msg) = nil
-
-    module Helper
-      def log
-        Legion::Logging
-      end
-
-      def handle_exception(exception, level: :error, **)
-        Legion::Logging.public_send(level, exception.message)
-      end
-    end
-  end
-
   module Extensions
     module Core
     end
@@ -63,18 +49,6 @@ module Legion
     end
 
     class Queue # rubocop:disable Lint/EmptyClass
-    end
-  end
-
-  module JSON
-    def self.dump(obj)
-      require 'json'
-      ::JSON.generate(obj)
-    end
-
-    def self.load(str, symbolize_names: false)
-      require 'json'
-      ::JSON.parse(str, symbolize_names: symbolize_names)
     end
   end
 

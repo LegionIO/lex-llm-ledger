@@ -129,11 +129,11 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Tools do
       expect(row[:expires_at]).not_to be_nil
     end
 
-    it 'propagates DecryptionUnavailable (NACK for requeue)' do
+    it 'propagates DecryptionFailed for missing iv headers (NACK without requeue)' do
       metadata[:properties][:content_encoding] = 'encrypted/cs'
       expect do
         described_class.write_tool_record('encrypted_blob', metadata)
-      end.to raise_error(Legion::Extensions::Llm::Ledger::Helpers::DecryptionUnavailable)
+      end.to raise_error(Legion::Extensions::Llm::Ledger::Helpers::DecryptionFailed, /missing iv/)
     end
   end
 end

@@ -17,7 +17,7 @@ module Legion
               Legion::LLM::Metering.flush_spool
               { result: :ok }
             rescue StandardError => e
-              log.warn("spool_flush failed: #{e.message}")
+              handle_exception(e, level: :warn, handled: true, operation: 'spool_flush')
               { result: :error, error: e.message }
             end
 
@@ -29,7 +29,7 @@ module Legion
 
               Writers::OfficialMeteringWriter.write(official_metering_payload(payload, ctx, props, headers))
             rescue StandardError => e
-              log.error("write_metering_record failed: #{e.message}")
+              handle_exception(e, level: :error, handled: true, operation: 'write_metering_record')
               { result: :error, error: e.message }
             end
 

@@ -1,11 +1,16 @@
 # frozen_string_literal: true
 
+require 'legion/logging'
+require_relative '../helpers/json'
+
 module Legion
   module Extensions
     module Llm
       module Ledger
         module Backfill
           module LegacyLlmRecords
+            extend Legion::Logging::Helper
+
             LEGACY_TABLES = %i[
               llm_prompt_records
               llm_metering_records
@@ -47,7 +52,7 @@ module Legion
                 backfill_registry(row)
               end
             rescue Sequel::UniqueConstraintViolation => e
-              warn("Skipping duplicate legacy LLM row during backfill: #{e.message}")
+              handle_exception(e, level: :warn, handled: true, operation: 'legacy_llm_backfill.duplicate')
               0
             end
 
@@ -198,14 +203,11 @@ module Legion
             def json_load(value)
               return {} if value.nil? || value.to_s.empty?
 
-              if defined?(::Legion::JSON)
-                ::Legion::JSON.load(value, symbolize_names: true)
-              else
-                require 'json'
-                ::JSON.parse(value, symbolize_names: true)
-              end
-            rescue JSON::ParserError => e
-              warn("Treating unparsable legacy JSON as content during backfill: #{e.message}")
+              Helpers::Json.load(value)
+            rescue StandardError => e
+              raise unless Helpers::Json.parse_error?(e)
+
+              handle_exception(e, level: :warn, handled: true, operation: 'legacy_llm_backfill.json_load')
               { content: value }
             end
           end

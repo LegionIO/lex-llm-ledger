@@ -1,11 +1,15 @@
 # frozen_string_literal: true
 
+require 'legion/settings'
+
 module Legion
   module Extensions
     module Llm
       module Ledger
         module Helpers
           module Retention
+            extend Legion::Settings::Helper
+
             PHI_TTL_DEFAULT_DAYS = 30
 
             RETENTION_MAP = {
@@ -47,26 +51,40 @@ module Legion
             end
 
             def default_days
-              if defined?(Legion::Settings) &&
-                 Legion::Settings.respond_to?(:dig) &&
-                 Legion::Settings.dig(:llm_ledger, :retention, :default_days)
-                Legion::Settings.dig(:llm_ledger, :retention, :default_days).to_i
-              else
-                90
-              end
+              setting(:retention, :default_days, default: 90).to_i
             end
 
             def phi_ttl_days
-              if defined?(Legion::Settings) &&
-                 Legion::Settings.respond_to?(:dig) &&
-                 Legion::Settings.dig(:llm_ledger, :retention, :phi_ttl_days)
-                Legion::Settings.dig(:llm_ledger, :retention, :phi_ttl_days).to_i
-              else
-                PHI_TTL_DEFAULT_DAYS
+              setting(:retention, :phi_ttl_days, default: PHI_TTL_DEFAULT_DAYS).to_i
+            end
+
+            def setting(*path, default:)
+              value = settings_sources.lazy
+                                      .map { |source| dig_setting(source, *path) }
+                                      .find { |candidate| !candidate.nil? }
+              return value unless value.nil?
+
+              default
+            end
+
+            def settings_sources
+              [
+                dig_setting(Legion::Settings[:extensions], :llm, :ledger),
+                dig_setting(settings, :ledger),
+                settings
+              ].compact
+            end
+
+            def dig_setting(source, *path)
+              path.reduce(source) do |current, key|
+                break nil unless current.respond_to?(:key?)
+
+                current[key] || current[key.to_s]
               end
             end
 
-            private_class_method :days_for_label, :apply_phi_cap, :default_days, :phi_ttl_days
+            private_class_method :days_for_label, :apply_phi_cap, :default_days, :phi_ttl_days, :setting,
+                                 :settings_sources, :dig_setting
           end
         end
       end

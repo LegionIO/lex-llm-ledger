@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../helpers/json'
+
 module Legion
   module Extensions
     module Llm
@@ -20,7 +22,7 @@ module Legion
               log.debug("write_registry_availability_record duplicate: #{e.message}")
               { result: :duplicate }
             rescue StandardError => e
-              log.error("write_registry_availability_record failed: #{e.message}")
+              handle_exception(e, level: :error, handled: true, operation: 'write_registry_availability_record')
               { result: :error, error: e.message }
             end
 
@@ -74,7 +76,7 @@ module Legion
             end
 
             def json_dump(value)
-              Legion::JSON.dump(json_safe(value)) # rubocop:disable Legion/HelperMigration/DirectJson
+              Helpers::Json.dump(json_safe(value))
             end
 
             def json_safe(value)

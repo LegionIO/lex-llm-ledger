@@ -2,6 +2,7 @@
 
 require 'digest'
 require 'securerandom'
+require_relative '../helpers/json'
 
 module Legion
   module Extensions
@@ -341,12 +342,7 @@ module Legion
             end
 
             def json_dump(value)
-              if defined?(::Legion::JSON)
-                ::Legion::JSON.dump(value)
-              else
-                require 'json'
-                ::JSON.generate(value)
-              end
+              Helpers::Json.dump(value)
             end
 
             def deep_symbolize(value)

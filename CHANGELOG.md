@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.3] - 2026-05-06
+
+### Fixed
+- Use the real `legion-json` load contract for ledger JSON parsing and remove root `JSON` fallbacks from runtime code.
+- Route retention TTL overrides through extension-scoped Legion settings and add default retention settings metadata.
+- Send handled runner/backfill errors through `handle_exception` for structured Legion logging.
+- Reject encrypted audit payloads that are missing the required `iv` header before attempting decryption.
+
 ## [0.2.2] - 2026-05-06
 
 ### Fixed

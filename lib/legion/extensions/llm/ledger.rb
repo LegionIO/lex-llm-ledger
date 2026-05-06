@@ -1,6 +1,10 @@
 # frozen_string_literal: true
 
+require 'legion/json'
+require 'legion/logging'
+require 'legion/settings'
 require_relative 'ledger/version'
+require_relative 'ledger/helpers/json'
 require_relative 'ledger/helpers/decryption'
 require_relative 'ledger/helpers/retention'
 require_relative 'ledger/helpers/queries'
@@ -16,7 +20,7 @@ require_relative 'ledger/runners/usage_reporter'
 require_relative 'ledger/runners/provider_stats'
 require_relative 'ledger/runners/registry_availability'
 
-if Legion::Extensions.const_defined?(:Core, false)
+if defined?(Legion::Extensions) && Legion::Extensions.const_defined?(:Core, false)
   require_relative 'ledger/transport/exchanges/metering'
   require_relative 'ledger/transport/exchanges/audit'
   require_relative 'ledger/transport/exchanges/registry'
@@ -37,9 +41,19 @@ module Legion
     module Llm
       module Ledger
         extend Legion::Extensions::Core if Legion::Extensions.const_defined?(:Core, false)
+        extend Legion::Logging::Helper
 
         def self.data_required? # rubocop:disable Legion/Extension/DataRequiredWithoutMigrations
           true
+        end
+
+        def self.default_settings
+          {
+            retention: {
+              default_days: 90,
+              phi_ttl_days: 30
+            }
+          }
         end
 
         def data_required?

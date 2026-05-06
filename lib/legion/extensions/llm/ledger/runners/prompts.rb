@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative '../helpers/caller_identity'
+require_relative '../helpers/json'
 
 module Legion
   module Extensions
@@ -25,10 +26,13 @@ module Legion
 
               Writers::OfficialPromptWriter.write(official_prompt_payload(body, ctx, props, headers, expires_at))
             rescue Helpers::DecryptionUnavailable => e
-              log.warn("write_prompt_record decryption unavailable: #{e.message}")
+              handle_exception(e, level: :warn, handled: true, operation: 'write_prompt_record.decrypt')
+              raise
+            rescue Helpers::DecryptionFailed => e
+              handle_exception(e, level: :error, handled: true, operation: 'write_prompt_record.decrypt')
               raise
             rescue StandardError => e
-              log.error("write_prompt_record failed: #{e.message}")
+              handle_exception(e, level: :error, handled: true, operation: 'write_prompt_record')
               { result: :error, error: e.message }
             end
 
@@ -67,9 +71,9 @@ module Legion
                 model_id:               routing[:model] || body[:model_id] || headers['x-legion-llm-model'],
                 tier:                   routing[:tier] || body[:tier] || headers['x-legion-llm-tier'],
                 request_type:           body[:request_type] || headers['x-legion-llm-request-type'],
-                request_json:           Legion::JSON.dump(body[:request] || body[:messages] || {}), # rubocop:disable Legion/HelperMigration/DirectJson
-                response_json:          Legion::JSON.dump(body[:response] || body[:response_content] || {}), # rubocop:disable Legion/HelperMigration/DirectJson
-                response_thinking_json: Legion::JSON.dump(response_thinking(body)), # rubocop:disable Legion/HelperMigration/DirectJson
+                request_json:           Helpers::Json.dump(body[:request] || body[:messages] || {}),
+                response_json:          Helpers::Json.dump(body[:response] || body[:response_content] || {}),
+                response_thinking_json: Helpers::Json.dump(response_thinking(body)),
                 input_tokens:           (tokens[:input] || tokens[:input_tokens]).to_i,
                 output_tokens:          (tokens[:output] || tokens[:output_tokens]).to_i,
                 total_tokens:           (tokens[:total] || tokens[:total_tokens]).to_i,

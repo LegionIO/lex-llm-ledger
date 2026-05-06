@@ -24,7 +24,7 @@ module Legion
 
               Legion::LLM::Metering.flush_spool
             rescue StandardError => e
-              log.warn("SpoolFlush error: #{e.message}")
+              handle_exception(e, level: :warn, handled: true, operation: 'spool_flush')
             end
 
             def run_now?

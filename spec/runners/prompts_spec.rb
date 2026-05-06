@@ -142,11 +142,11 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Prompts do
       expect(official_payload[:caller_type]).to eq('service')
     end
 
-    it 'propagates DecryptionUnavailable (NACK for requeue)' do
+    it 'propagates DecryptionFailed for missing iv headers (NACK without requeue)' do
       metadata[:properties][:content_encoding] = 'encrypted/cs'
       expect do
         described_class.write_prompt_record('encrypted_blob', metadata)
-      end.to raise_error(Legion::Extensions::Llm::Ledger::Helpers::DecryptionUnavailable)
+      end.to raise_error(Legion::Extensions::Llm::Ledger::Helpers::DecryptionFailed, /missing iv/)
     end
   end
 end

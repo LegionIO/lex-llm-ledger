@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative '../helpers/caller_identity'
+require_relative '../helpers/json'
 
 module Legion
   module Extensions
@@ -31,10 +32,13 @@ module Legion
               log.debug("write_tool_record duplicate: #{e.message}")
               { result: :duplicate }
             rescue Helpers::DecryptionUnavailable => e
-              log.warn("write_tool_record decryption unavailable: #{e.message}")
+              handle_exception(e, level: :warn, handled: true, operation: 'write_tool_record.decrypt')
+              raise
+            rescue Helpers::DecryptionFailed => e
+              handle_exception(e, level: :error, handled: true, operation: 'write_tool_record.decrypt')
               raise
             rescue StandardError => e
-              log.error("write_tool_record failed: #{e.message}")
+              handle_exception(e, level: :error, handled: true, operation: 'write_tool_record')
               { result: :error, error: e.message }
             end
 
@@ -71,9 +75,9 @@ module Legion
                 tool_source_server:   src[:server] || headers['x-legion-tool-source-server'],
                 tool_status:          tool[:status] || headers['x-legion-tool-status'],
                 tool_duration_ms:     tool[:duration_ms].to_i,
-                arguments_json:       Legion::JSON.dump(tool[:arguments] || {}), # rubocop:disable Legion/HelperMigration/DirectJson
-                result_json:          Legion::JSON.dump(tool[:result] || body[:result]), # rubocop:disable Legion/HelperMigration/DirectJson
-                error_json:           Legion::JSON.dump(tool[:error] || body[:error]), # rubocop:disable Legion/HelperMigration/DirectJson
+                arguments_json:       Helpers::Json.dump(tool[:arguments] || {}),
+                result_json:          Helpers::Json.dump(tool[:result] || body[:result]),
+                error_json:           Helpers::Json.dump(tool[:error] || body[:error]),
                 caller_identity:      caller_identity[:identity],
                 agent_id:             agent[:id],
                 classification_level: cls[:level] || headers['x-legion-classification'],
