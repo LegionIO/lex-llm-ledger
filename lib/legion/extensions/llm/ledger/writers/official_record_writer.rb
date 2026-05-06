@@ -22,7 +22,7 @@ module Legion
                 request = find_or_create_request(db, conversation, user_message, body)
                 response_message = find_or_create_response_message(db, conversation, request, body)
                 response = find_or_create_response(db, request, response_message, body)
-                response_message.update(message_inference_response_id: response[:id])
+                link_response_message!(db, response_message, response)
                 metric = find_or_create_metric(db, request, response, body)
                 result = { result: :ok, request_id: request[:id], response_id: response[:id], metric_id: metric[:id] }
               end
@@ -204,7 +204,16 @@ module Legion
             end
 
             def request_ref(body)
-              reference(body, :request_id, :request_ref) || correlation_id(body) || stable_uuid(SecureRandom.uuid)
+              body[:__ledger_request_ref] ||= reference(body, :request_id, :request_ref) ||
+                                              correlation_id(body) ||
+                                              stable_uuid(SecureRandom.uuid)
+            end
+
+            def link_response_message!(db, response_message, response)
+              return unless response_message && response
+              return if response_message[:message_inference_response_id] == response[:id]
+
+              db[:llm_messages].where(id: response_message[:id]).update(message_inference_response_id: response[:id])
             end
 
             def correlation_id(body)

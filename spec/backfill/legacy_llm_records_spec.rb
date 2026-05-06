@@ -13,10 +13,29 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Backfill::LegacyLlmRecords do
     expect(result[:llm_metering_records]).to eq(1)
     expect(result[:llm_tool_records]).to eq(1)
     expect(result[:llm_registry_availability_records]).to eq(1)
-    expect(Legion::Data.connection[:llm_message_inference_requests].count).to eq(3)
-    expect(Legion::Data.connection[:llm_message_inference_metrics].count).to eq(3)
+    expect(Legion::Data.connection[:llm_message_inference_requests].count).to eq(2)
+    expect(Legion::Data.connection[:llm_message_inference_metrics].count).to eq(2)
     expect(Legion::Data.connection[:llm_tool_calls].count).to eq(1)
     expect(Legion::Data.connection[:llm_registry_events].count).to eq(1)
+
+    rerun_result = described_class.run
+    expect(rerun_result).to eq(
+      llm_prompt_records:                0,
+      llm_metering_records:              0,
+      llm_tool_records:                  0,
+      llm_registry_availability_records: 0
+    )
+  end
+
+  it 'skips legacy tool rows that cannot link to an existing official inference response' do
+    insert_legacy_tool(request_id: 'missing-request')
+
+    result = described_class.run
+
+    expect(result[:llm_tool_records]).to eq(0)
+    expect(Legion::Data.connection[:llm_message_inference_requests].count).to eq(0)
+    expect(Legion::Data.connection[:llm_message_inference_metrics].count).to eq(0)
+    expect(Legion::Data.connection[:llm_tool_calls].count).to eq(0)
   end
 
   it 'hard-stops legacy-only writer mode after official cutover' do
@@ -70,13 +89,13 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Backfill::LegacyLlmRecords do
     )
   end
 
-  def insert_legacy_tool
+  def insert_legacy_tool(request_id: 'req-prompt')
     Legion::Data.connection[:llm_tool_records].insert(
       message_id:      'tool-1',
       correlation_id:  'corr-3',
       conversation_id: 'conv-legacy',
       message_id_ctx:  'msg-4',
-      request_id:      'req-tool',
+      request_id:      request_id,
       tool_call_id:    'call-1',
       tool_name:       'lookup',
       tool_status:     'success',

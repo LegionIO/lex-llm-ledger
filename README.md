@@ -22,10 +22,13 @@ AMQP queues, decrypts audit payloads, enforces retention policies, and writes of
 - `llm_tool_calls` - Provider-requested tool call lineage
 - `llm_registry_events` - Provider/model availability events
 
-Legacy `llm_prompt_records`, `llm_metering_records`, `llm_tool_records`, and
-`llm_registry_availability_records` are backfill inputs only after the official
-cutover. Legacy-only writer mode hard-stops instead of silently writing stale
-projections.
+Prompt and metering consumers write the official lifecycle tables directly.
+`llm_tool_records` and `llm_registry_availability_records` remain operational
+projection tables while the official tool/registry event cutover continues.
+The legacy backfill reconciles those rows into `llm_tool_calls` and
+`llm_registry_events` when they can be linked to official inference responses.
+Legacy-only prompt/metering writer mode hard-stops instead of silently writing
+stale projections.
 
 ## Event Spine Target
 

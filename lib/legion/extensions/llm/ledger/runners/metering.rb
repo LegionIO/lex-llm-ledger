@@ -22,7 +22,6 @@ module Legion
             end
 
             def write_metering_record(payload = nil, metadata = {}, **message)
-              log.unknown "write_metering_record => #{metadata}, payload: #{payload}, message: #{message}"
               payload, metadata = normalize_runner_args(payload, metadata, message)
               headers = Helpers::SubscriptionMessage.extract_headers(payload, metadata)
               ctx     = payload[:message_context] || {}

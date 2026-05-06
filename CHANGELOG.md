@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2] - 2026-05-06
+
+### Fixed
+- Persist official response-message foreign keys, keep generated request references stable within a write, and remove raw payload logging from ledger runners.
+- Make legacy backfill counts idempotent and attach legacy tool rows only to existing official inference responses.
+- Clarify README cutover status for tool and registry projection tables.
+
 ## [0.2.1] - 2026-05-06
 
 ### Fixed

@@ -11,7 +11,6 @@ module Legion
             extend self
 
             def write_prompt_record(payload = nil, metadata = {}, **message)
-              log.unknown "write_prompt_record => #{metadata}, payload: #{payload}, message: #{message.except(:system_prompt, :messages)}"
               payload, metadata = normalize_runner_args(payload, metadata, message)
               headers = Helpers::SubscriptionMessage.extract_headers(payload, metadata)
               props   = metadata[:properties] || {}

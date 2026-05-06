@@ -51,6 +51,9 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Writers::OfficialPromptWriter do
     expect(response[:dispatch_path]).to eq('fleet')
     expect(JSON.parse(response[:response_json])).to eq('content' => 'Hello')
     expect(JSON.parse(response[:response_thinking_json])).to eq('content' => 'hidden')
+
+    assistant_message = Legion::Data.connection[:llm_messages].where(role: 'assistant').first
+    expect(assistant_message[:message_inference_response_id]).to eq(response[:id])
   end
 
   it 'is idempotent for the same request and response references' do
@@ -62,5 +65,19 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Writers::OfficialPromptWriter do
     expect(Legion::Data.connection[:llm_messages].count).to eq(2)
     expect(Legion::Data.connection[:llm_message_inference_requests].count).to eq(1)
     expect(Legion::Data.connection[:llm_message_inference_responses].count).to eq(1)
+  end
+
+  it 'uses one generated request reference across a write when no request ids are present' do
+    generated_payload = payload.except(:request_id, :correlation_id, :message_id, :response_message_id)
+
+    described_class.write(generated_payload)
+
+    request = Legion::Data.connection[:llm_message_inference_requests].first
+    expect(request[:request_ref]).not_to be_nil
+    expect(request[:uuid]).to eq(
+      Legion::Extensions::Llm::Ledger::Writers::OfficialRecordWriter.stable_uuid(request[:request_ref])
+    )
+    assistant_message = Legion::Data.connection[:llm_messages].where(role: 'assistant').first
+    expect(assistant_message[:message_inference_request_id]).to eq(request[:id])
   end
 end

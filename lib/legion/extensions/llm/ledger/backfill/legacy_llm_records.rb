@@ -38,18 +38,33 @@ module Legion
             def backfill_row(table, row)
               case table
               when :llm_prompt_records
-                Writers::OfficialPromptWriter.write(prompt_payload(row))
+                backfill_prompt(row)
               when :llm_metering_records
-                Writers::OfficialMeteringWriter.write(metering_payload(row))
+                backfill_metering(row)
               when :llm_tool_records
                 backfill_tool(row)
               when :llm_registry_availability_records
                 backfill_registry(row)
               end
-              1
             rescue Sequel::UniqueConstraintViolation => e
               warn("Skipping duplicate legacy LLM row during backfill: #{e.message}")
               0
+            end
+
+            def backfill_prompt(row)
+              payload = prompt_payload(row)
+              return 0 if official_metric_exists?(payload)
+
+              Writers::OfficialPromptWriter.write(payload)
+              1
+            end
+
+            def backfill_metering(row)
+              payload = metering_payload(row)
+              return 0 if official_metric_exists?(payload)
+
+              Writers::OfficialMeteringWriter.write(payload)
+              1
             end
 
             def prompt_payload(row)
@@ -108,7 +123,6 @@ module Legion
             end
 
             def backfill_tool(row)
-              Writers::OfficialMeteringWriter.write(tool_placeholder_payload(row))
               response = response_for_request(row[:request_id])
               return 0 unless response
 
@@ -148,25 +162,20 @@ module Legion
               1
             end
 
-            def tool_placeholder_payload(row)
-              {
-                message_id:      "tool-meter:#{row[:message_id]}",
-                correlation_id:  row[:correlation_id],
-                conversation_id: row[:conversation_id],
-                request_id:      row[:request_id],
-                operation:       'tool',
-                provider:        'tool',
-                model_id:        row[:tool_name],
-                tier:            'tool',
-                recorded_at:     row[:tool_start_at] || row[:inserted_at]
-              }
-            end
-
             def response_for_request(request_id)
               request = db[:llm_message_inference_requests].where(request_ref: request_id).first
               return nil unless request
 
               db[:llm_message_inference_responses].where(message_inference_request_id: request[:id]).first
+            end
+
+            def official_metric_exists?(payload)
+              db[:llm_message_inference_metrics].where(uuid: official_metric_uuid(payload)).first
+            end
+
+            def official_metric_uuid(payload)
+              ref = payload[:message_id] || "metric:#{Writers::OfficialRecordWriter.request_ref(payload)}"
+              Writers::OfficialRecordWriter.stable_uuid(ref)
             end
 
             def next_tool_index(response_id)
