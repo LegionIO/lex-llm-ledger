@@ -10,6 +10,7 @@ require_relative 'ledger/helpers/retention'
 require_relative 'ledger/helpers/queries'
 require_relative 'ledger/helpers/subscription_message'
 require_relative 'ledger/helpers/subscription_actor'
+require_relative 'ledger/helpers/persistence_logging'
 require_relative 'ledger/helpers/caller_identity'
 require_relative 'ledger/writers/official_prompt_writer'
 require_relative 'ledger/writers/official_metering_writer'
@@ -30,10 +31,10 @@ if defined?(Legion::Extensions) && Legion::Extensions.const_defined?(:Core, fals
   require_relative 'ledger/transport/queues/audit_tools'
   require_relative 'ledger/transport/queues/registry_availability'
   require_relative 'ledger/transport/transport'
-  require_relative 'ledger/actors/metering_writer'
-  require_relative 'ledger/actors/prompt_writer'
-  require_relative 'ledger/actors/tool_writer'
-  require_relative 'ledger/actors/registry_availability_writer'
+  require_relative 'ledger/actors/metering'
+  require_relative 'ledger/actors/prompts'
+  require_relative 'ledger/actors/tools'
+  require_relative 'ledger/actors/registry_availability'
   require_relative 'ledger/actors/spool_flush'
 end
 
@@ -50,19 +51,11 @@ module Legion
 
         def self.default_settings
           {
-            remote_invocable: false,
-            retention:        {
+            retention: {
               default_days: 90,
               phi_ttl_days: 30
             }
           }
-        end
-
-        def self.remote_invocable?
-          configured = Legion::Settings.dig(:extensions, :llm, :ledger, :remote_invocable) if defined?(Legion::Settings)
-          return configured unless configured.nil?
-
-          false
         end
 
         def data_required?

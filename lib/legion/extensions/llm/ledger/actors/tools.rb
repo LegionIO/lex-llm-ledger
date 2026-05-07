@@ -8,13 +8,13 @@ module Legion
     module Llm
       module Ledger
         module Actor
-          class MeteringWriter < Legion::Extensions::Actors::Subscription
+          class Tools < Legion::Extensions::Actors::Subscription
             include Helpers::SubscriptionActor
 
-            def runner_class = Legion::Extensions::Llm::Ledger::Runners::Metering
+            def runner_class = Legion::Extensions::Llm::Ledger::Runners::Tools
 
             def runner_function
-              'write_metering_record'
+              'write_tool_record'
             end
 
             def use_runner?
@@ -22,7 +22,7 @@ module Legion
             end
 
             def queue
-              Legion::Extensions::Llm::Ledger::Transport::Queues::MeteringWrite
+              Legion::Extensions::Llm::Ledger::Transport::Queues::AuditTools
             end
           end
         end

@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-RSpec.describe Legion::Extensions::Llm::Ledger::Actor::RegistryAvailabilityWriter do
+RSpec.describe Legion::Extensions::Llm::Ledger::Actor::RegistryAvailability do
   subject(:actor) { described_class.new }
 
   it 'returns Runners::RegistryAvailability as runner_class' do

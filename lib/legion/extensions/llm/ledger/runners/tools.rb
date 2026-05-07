@@ -2,6 +2,7 @@
 
 require_relative '../helpers/caller_identity'
 require_relative '../helpers/json'
+require_relative '../helpers/persistence_logging'
 
 module Legion
   module Extensions
@@ -26,10 +27,15 @@ module Legion
               )
 
               record = build_tool_record(body, ctx, tool, props, headers, expires_at)
-              ::Legion::Data.connection[:llm_tool_records].insert(record)
+              Helpers::PersistenceLogging.insert_row(
+                ::Legion::Data.connection,
+                :llm_tool_records,
+                record,
+                operation: 'write_tool_record'
+              )
               { result: :ok }
             rescue Sequel::UniqueConstraintViolation => e
-              log.debug("write_tool_record duplicate: #{e.message}")
+              log.warn("write_tool_record duplicate insert ignored: #{e.message}")
               { result: :duplicate }
             rescue Helpers::DecryptionUnavailable => e
               handle_exception(e, level: :warn, handled: true, operation: 'write_tool_record.decrypt')

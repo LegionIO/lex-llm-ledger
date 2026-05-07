@@ -148,7 +148,7 @@ rejected as malformed encrypted audit records rather than retried.
 ## Usage
 
 ```ruby
-# Metering write (called by MeteringWriter actor)
+# Metering write (called by Metering actor)
 Legion::Extensions::Llm::Ledger::Runners::Metering.write_metering_record(payload, metadata)
 
 # Usage summary

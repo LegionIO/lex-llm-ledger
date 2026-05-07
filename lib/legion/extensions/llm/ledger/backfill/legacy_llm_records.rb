@@ -2,6 +2,7 @@
 
 require 'legion/logging'
 require_relative '../helpers/json'
+require_relative '../helpers/persistence_logging'
 
 module Legion
   module Extensions
@@ -134,19 +135,19 @@ module Legion
               tool_uuid = Writers::OfficialRecordWriter.stable_uuid(row[:tool_call_id] || row[:message_id])
               return 0 if db[:llm_tool_calls].where(uuid: tool_uuid).first
 
-              db[:llm_tool_calls].insert(
-                uuid:                          tool_uuid,
-                message_inference_response_id: response[:id],
-                tool_call_index:               next_tool_index(response[:id]),
-                provider_tool_call_ref:        row[:tool_call_id],
-                tool_name:                     row[:tool_name],
-                tool_source_type:              row[:tool_source_type],
-                tool_source_server:            row[:tool_source_server],
-                status:                        row[:tool_status],
-                requested_at:                  row[:tool_start_at],
-                completed_at:                  row[:tool_end_at],
-                inserted_at:                   Time.now.utc
-              )
+              insert_row(:llm_tool_calls, {
+                           uuid:                          tool_uuid,
+                           message_inference_response_id: response[:id],
+                           tool_call_index:               next_tool_index(response[:id]),
+                           provider_tool_call_ref:        row[:tool_call_id],
+                           tool_name:                     row[:tool_name],
+                           tool_source_type:              row[:tool_source_type],
+                           tool_source_server:            row[:tool_source_server],
+                           status:                        row[:tool_status],
+                           requested_at:                  row[:tool_start_at],
+                           completed_at:                  row[:tool_end_at],
+                           inserted_at:                   Time.now.utc
+                         }, operation: 'legacy_llm_backfill.tool_call')
               1
             end
 
@@ -154,17 +155,21 @@ module Legion
               uuid = Writers::OfficialRecordWriter.stable_uuid(row[:event_id] || row[:message_id])
               return 0 if db[:llm_registry_events].where(uuid: uuid).first
 
-              db[:llm_registry_events].insert(
-                uuid:        uuid,
-                provider:    row[:provider_family],
-                model_key:   row[:model_id],
-                event_type:  row[:event_type],
-                status:      registry_status(row),
-                reason:      row[:metadata_json],
-                recorded_at: row[:occurred_at],
-                inserted_at: Time.now.utc
-              )
+              insert_row(:llm_registry_events, {
+                           uuid:        uuid,
+                           provider:    row[:provider_family],
+                           model_key:   row[:model_id],
+                           event_type:  row[:event_type],
+                           status:      registry_status(row),
+                           reason:      row[:metadata_json],
+                           recorded_at: row[:occurred_at],
+                           inserted_at: Time.now.utc
+                         }, operation: 'legacy_llm_backfill.registry_event')
               1
+            end
+
+            def insert_row(table, attributes, operation:)
+              Helpers::PersistenceLogging.insert_row(db, table, attributes, operation: operation)
             end
 
             def response_for_request(request_id)

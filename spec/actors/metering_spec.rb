@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-RSpec.describe Legion::Extensions::Llm::Ledger::Actor::MeteringWriter do
+RSpec.describe Legion::Extensions::Llm::Ledger::Actor::Metering do
   subject(:actor) { described_class.new }
 
   it 'returns Runners::Metering as runner_class' do

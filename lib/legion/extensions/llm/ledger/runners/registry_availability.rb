@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative '../helpers/json'
+require_relative '../helpers/persistence_logging'
 
 module Legion
   module Extensions
@@ -16,10 +17,15 @@ module Legion
 
               body = symbolize(payload)
               record = build_registry_availability_record(body, props)
-              ::Legion::Data.connection[:llm_registry_availability_records].insert(record)
+              Helpers::PersistenceLogging.insert_row(
+                ::Legion::Data.connection,
+                :llm_registry_availability_records,
+                record,
+                operation: 'write_registry_availability_record'
+              )
               { result: :ok }
             rescue Sequel::UniqueConstraintViolation => e
-              log.debug("write_registry_availability_record duplicate: #{e.message}")
+              log.warn("write_registry_availability_record duplicate insert ignored: #{e.message}")
               { result: :duplicate }
             rescue StandardError => e
               handle_exception(e, level: :error, handled: true, operation: 'write_registry_availability_record')

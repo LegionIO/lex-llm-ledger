@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-RSpec.describe Legion::Extensions::Llm::Ledger::Actor::ToolWriter do
+RSpec.describe Legion::Extensions::Llm::Ledger::Actor::Tools do
   subject(:actor) { described_class.new }
 
   it 'returns Runners::Tools as runner_class' do

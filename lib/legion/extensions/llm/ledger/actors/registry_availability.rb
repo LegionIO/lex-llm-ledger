@@ -8,13 +8,13 @@ module Legion
     module Llm
       module Ledger
         module Actor
-          class PromptWriter < Legion::Extensions::Actors::Subscription
+          class RegistryAvailability < Legion::Extensions::Actors::Subscription
             include Helpers::SubscriptionActor
 
-            def runner_class = Legion::Extensions::Llm::Ledger::Runners::Prompts
+            def runner_class = Legion::Extensions::Llm::Ledger::Runners::RegistryAvailability
 
             def runner_function
-              'write_prompt_record'
+              'write_registry_availability_record'
             end
 
             def use_runner?
@@ -22,7 +22,7 @@ module Legion
             end
 
             def queue
-              Legion::Extensions::Llm::Ledger::Transport::Queues::AuditPrompts
+              Legion::Extensions::Llm::Ledger::Transport::Queues::RegistryAvailability
             end
           end
         end
