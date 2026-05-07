@@ -1,14 +1,16 @@
 # frozen_string_literal: true
 
 require 'legion/extensions/actors/subscription'
-require_relative '../helpers/subscription_message'
+require_relative '../helpers/subscription_actor'
 
 module Legion
   module Extensions
     module Llm
       module Ledger
         module Actor
-          class PromptWriter < Legion::Extensions::Actors::Subscription
+          class Prompts < Legion::Extensions::Actors::Subscription
+            include Helpers::SubscriptionActor
+
             def runner_class = Legion::Extensions::Llm::Ledger::Runners::Prompts
 
             def runner_function
@@ -19,8 +21,8 @@ module Legion
               false
             end
 
-            def process_message(message, metadata, delivery_info)
-              Helpers::SubscriptionMessage.decode_payload(message, metadata, delivery_info)
+            def queue
+              Legion::Extensions::Llm::Ledger::Transport::Queues::AuditPrompts
             end
           end
         end

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'decryption'
+require_relative 'json'
 
 module Legion
   module Extensions
@@ -48,24 +49,39 @@ module Legion
             def decrypt_payload(message, headers, properties)
               return message unless properties[:content_encoding] == 'encrypted/cs'
 
-              iv = headers['iv'] || headers[:iv]
-              raise DecryptionFailed, 'Encrypted audit record is missing iv header' if iv.nil?
-
-              Legion::Crypt.decrypt(message, iv)
+              Decryption.decrypt_if_needed(
+                message,
+                headers:    headers,
+                properties: properties
+              )
             end
 
             def parse_payload(payload, properties)
+              return payload if payload.is_a?(Hash)
               return payload unless properties[:content_type] == 'application/json'
 
-              if json_load_keyword?(:symbolize_keys)
-                Legion::JSON.load(payload, symbolize_keys: true) # rubocop:disable Legion/HelperMigration/DirectJson
-              else
-                Legion::JSON.load(payload, symbolize_names: true) # rubocop:disable Legion/HelperMigration/DirectJson
+              Json.load(payload)
+            end
+
+            def extract_headers(payload, metadata)
+              explicit = metadata[:headers]
+              return explicit if explicit.is_a?(Hash) && explicit.any?
+              return {} unless payload.is_a?(Hash)
+
+              payload.each_with_object({}) do |(key, value), hdrs|
+                str = key.to_s
+                hdrs[str] = value if str.start_with?('x-legion-') || str == 'legion_protocol_version'
               end
             end
 
             def runner_args(payload, metadata, message)
-              message.key?(:payload) ? [message[:payload], message[:metadata] || {}] : [payload, metadata]
+              if message.key?(:payload)
+                [message[:payload], message[:metadata] || {}]
+              elsif payload.nil? && message.any?
+                [message, metadata]
+              else
+                [payload, metadata]
+              end
             end
 
             def routing_key(delivery_info)
@@ -100,12 +116,8 @@ module Legion
               end
             end
 
-            def json_load_keyword?(keyword)
-              Legion::JSON.method(:load).parameters.any? { |type, name| type == :key && name == keyword }
-            end
-
             private_class_method :metadata_headers, :metadata_properties, :decrypt_payload, :parse_payload,
-                                 :routing_key, :metadata_value, :metadata_key?, :symbolize, :json_load_keyword?
+                                 :routing_key, :metadata_value, :metadata_key?, :symbolize
           end
         end
       end

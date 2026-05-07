@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.2.5] - 2026-05-06
+
+### Fixed
+- Log every successful ledger audit and metric database insert at `info` with safe row context.
+- Log duplicate insert failures at `warn` and unexpected insert failures at `error` before returning or re-raising.
+
+## [0.2.4] - 2026-05-06
+
+### Fixed
+- Replace generated runner subscription actors with runner-named ledger-owned subscription actors so audit queues are consumed through the ledger decoder.
+- Route ledger subscription actor payload decoding through the ledger decoder so encrypted audit messages preserve metadata and missing-IV messages dead-letter before core decryption.
+
+## [0.2.3] - 2026-05-06
+
+### Fixed
+- Use the real `legion-json` load contract for ledger JSON parsing and remove root `JSON` fallbacks from runtime code.
+- Route retention TTL overrides through extension-scoped Legion settings and add default retention settings metadata.
+- Send handled runner/backfill errors through `handle_exception` for structured Legion logging.
+- Reject encrypted audit payloads that are missing the required `iv` header before attempting decryption.
+
+## [0.2.2] - 2026-05-06
+
+### Fixed
+- Persist official response-message foreign keys, keep generated request references stable within a write, and remove raw payload logging from ledger runners.
+- Make legacy backfill counts idempotent and attach legacy tool rows only to existing official inference responses.
+- Clarify README cutover status for tool and registry projection tables.
+
+## [0.2.1] - 2026-05-06
+
+### Fixed
+- Preserve namespaced caller identities from current LLM audit and metering envelopes instead of storing ambiguous display identities such as `system`.
+
+## [0.2.0] - 2026-05-06
+
+### Changed
+- Write prompt audit and metering events into the official `legion-data` LLM lifecycle schema instead of legacy ledger-only tables.
+- Move provider stats and usage reporting to official inference request, response, and metric tables grouped by provider, provider instance, model, and operation.
+- Bumped the transport dependency floor to `legion-transport >= 1.4.14` for the coordinated fleet envelope sweep.
+
+### Added
+- Add official prompt and metering writers plus legacy LLM ledger backfill for prompt, metering, tool, and registry availability records.
+- Add a hard stop for legacy-only writer mode after official cutover.
+
+## [0.1.13] - 2026-05-03
+
+### Added
+- Add `response_thinking_json` to prompt audit records so provider thinking payloads are stored separately from assistant response content.
+
 ## [0.1.12] - 2026-04-28
 
 ### Added

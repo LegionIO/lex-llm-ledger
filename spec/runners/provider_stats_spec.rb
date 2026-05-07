@@ -3,41 +3,38 @@
 RSpec.describe Legion::Extensions::Llm::Ledger::Runners::ProviderStats do
   def insert_metering(overrides = {})
     defaults = {
-      message_id:      "meter_#{SecureRandom.hex(4)}",
-      correlation_id:  'req_abc',
-      conversation_id: 'conv_123',
-      message_id_ctx:  'msg_005',
-      request_id:      'req_abc',
-      request_type:    'chat',
-      tier:            'fleet',
-      provider:        'ollama',
-      model_id:        'qwen3.5:27b',
-      node_id:         'laptop-matt-01',
-      input_tokens:    42,
-      output_tokens:   28,
-      thinking_tokens: 0,
-      total_tokens:    70,
-      latency_ms:      1000,
-      wall_clock_ms:   1100,
-      cost_usd:        0.0,
-      recorded_at:     '2026-04-08T14:30:01.300Z',
-      inserted_at:     Time.now.utc
+      message_id:        "meter_#{SecureRandom.hex(4)}",
+      request_id:        "req_#{SecureRandom.hex(4)}",
+      conversation_id:   'conv_123',
+      operation:         'chat',
+      tier:              'fleet',
+      provider:          'ollama',
+      provider_instance: 'local',
+      model_id:          'qwen3.5:27b',
+      input_tokens:      42,
+      output_tokens:     28,
+      thinking_tokens:   0,
+      total_tokens:      70,
+      latency_ms:        1000,
+      wall_clock_ms:     1100,
+      cost_usd:          0.0,
+      recorded_at:       Time.now.utc
     }
-    Legion::Data::DB[:metering_records].insert(defaults.merge(overrides))
+    Legion::Extensions::Llm::Ledger::Writers::OfficialMeteringWriter.write(defaults.merge(overrides))
   end
 
   describe '.health_report' do
-    it 'returns all providers with status' do
-      insert_metering(provider: 'ollama', latency_ms: 500)
-      insert_metering(message_id: 'meter_002', provider: 'bedrock', latency_ms: 3000)
+    it 'returns all provider instances with status from official metrics' do
+      insert_metering(provider: 'ollama', provider_instance: 'local', latency_ms: 500)
+      insert_metering(provider: 'bedrock', provider_instance: 'east', latency_ms: 3000)
 
       results = described_class.health_report
       expect(results.length).to eq(2)
 
-      ollama = results.find { |r| r[:provider] == 'ollama' }
+      ollama = results.find { |r| r[:provider] == 'ollama' && r[:provider_instance] == 'local' }
       expect(ollama[:status]).to eq(:healthy)
 
-      bedrock = results.find { |r| r[:provider] == 'bedrock' }
+      bedrock = results.find { |r| r[:provider] == 'bedrock' && r[:provider_instance] == 'east' }
       expect(bedrock[:status]).to eq(:degraded)
     end
 
@@ -49,22 +46,25 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::ProviderStats do
   end
 
   describe '.circuit_summary' do
-    it 'groups by provider and tier' do
-      insert_metering(provider: 'ollama', tier: 'fleet')
-      insert_metering(message_id: 'meter_002', provider: 'ollama', tier: 'local')
+    it 'groups by provider, provider instance, model, operation, and tier' do
+      insert_metering(provider: 'ollama', provider_instance: 'local', tier: 'fleet')
+      insert_metering(provider: 'ollama', provider_instance: 'apollo', tier: 'fleet')
 
       results = described_class.circuit_summary(period: 'day')
       expect(results.length).to eq(2)
+      expect(results.map { |row| row[:provider_instance] }).to contain_exactly('local', 'apollo')
     end
   end
 
   describe '.provider_detail' do
-    it 'returns only rows for the specified provider' do
-      insert_metering(provider: 'ollama')
-      insert_metering(message_id: 'meter_002', provider: 'bedrock')
+    it 'returns only rows for the specified provider grouped by official dimensions' do
+      insert_metering(provider: 'ollama', provider_instance: 'local')
+      insert_metering(provider: 'bedrock', provider_instance: 'east')
 
       results = described_class.provider_detail(provider: 'ollama', period: 'day')
       expect(results.length).to eq(1)
+      expect(results.first[:provider]).to eq('ollama')
+      expect(results.first[:operation]).to eq('chat')
     end
   end
 end

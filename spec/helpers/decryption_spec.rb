@@ -42,11 +42,26 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Helpers::Decryption do
         expect(result[:data]).to eq('secret')
         expect(result[:message_context][:conversation_id]).to eq('conv_123')
       end
+
+      it 'rejects encrypted payloads without an iv header' do
+        metadata = {
+          properties: { content_encoding: 'encrypted/cs' },
+          headers:    {}
+        }
+
+        expect do
+          described_class.decrypt_if_needed('encrypted_blob', metadata)
+        end.to raise_error(Legion::Extensions::Llm::Ledger::Helpers::DecryptionFailed, /missing iv/)
+      end
     end
 
     context 'when Legion::Crypt is unavailable' do
       it 'raises DecryptionUnavailable' do
-        metadata = { properties: { content_encoding: 'encrypted/cs' } }
+        metadata = {
+          properties: { content_encoding: 'encrypted/cs' },
+          headers:    { 'iv' => 'base64iv==' }
+        }
+
         expect do
           described_class.decrypt_if_needed('encrypted_blob', metadata)
         end.to raise_error(Legion::Extensions::Llm::Ledger::Helpers::DecryptionUnavailable)

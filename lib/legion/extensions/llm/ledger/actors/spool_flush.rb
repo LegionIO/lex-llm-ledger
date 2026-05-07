@@ -24,7 +24,7 @@ module Legion
 
               Legion::LLM::Metering.flush_spool
             rescue StandardError => e
-              Legion::Logging.warn("[lex-llm-ledger] SpoolFlush error: #{e.message}") # rubocop:disable Legion/HelperMigration/DirectLogging
+              handle_exception(e, level: :warn, handled: true, operation: 'spool_flush')
             end
 
             def run_now?

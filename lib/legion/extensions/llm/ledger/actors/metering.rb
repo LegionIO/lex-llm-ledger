@@ -1,13 +1,16 @@
 # frozen_string_literal: true
 
 require 'legion/extensions/actors/subscription'
+require_relative '../helpers/subscription_actor'
 
 module Legion
   module Extensions
     module Llm
       module Ledger
         module Actor
-          class MeteringWriter < Legion::Extensions::Actors::Subscription
+          class Metering < Legion::Extensions::Actors::Subscription
+            include Helpers::SubscriptionActor
+
             def runner_class = Legion::Extensions::Llm::Ledger::Runners::Metering
 
             def runner_function
@@ -16,6 +19,10 @@ module Legion
 
             def use_runner?
               false
+            end
+
+            def queue
+              Legion::Extensions::Llm::Ledger::Transport::Queues::MeteringWrite
             end
           end
         end

@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require_relative '../helpers/json'
+require_relative '../helpers/persistence_logging'
+
 module Legion
   module Extensions
     module Llm
@@ -14,12 +17,18 @@ module Legion
 
               body = symbolize(payload)
               record = build_registry_availability_record(body, props)
-              ::Legion::Data::DB[:registry_availability_records].insert(record)
+              Helpers::PersistenceLogging.insert_row(
+                ::Legion::Data.connection,
+                :llm_registry_availability_records,
+                record,
+                operation: 'write_registry_availability_record'
+              )
               { result: :ok }
-            rescue Sequel::UniqueConstraintViolation => _e
+            rescue Sequel::UniqueConstraintViolation => e
+              log.warn("write_registry_availability_record duplicate insert ignored: #{e.message}")
               { result: :duplicate }
             rescue StandardError => e
-              Legion::Logging.error("[lex-llm-ledger] write_registry_availability_record failed: #{e.message}") # rubocop:disable Legion/HelperMigration/DirectLogging
+              handle_exception(e, level: :error, handled: true, operation: 'write_registry_availability_record')
               { result: :error, error: e.message }
             end
 
@@ -73,7 +82,7 @@ module Legion
             end
 
             def json_dump(value)
-              Legion::JSON.dump(json_safe(value)) # rubocop:disable Legion/HelperMigration/DirectJson
+              Helpers::Json.dump(json_safe(value))
             end
 
             def json_safe(value)
@@ -99,6 +108,9 @@ module Legion
                 value
               end
             end
+
+            include Legion::Extensions::Helpers::Lex if Legion::Extensions.const_defined?(:Helpers, false) &&
+                                                        Legion::Extensions::Helpers.const_defined?(:Lex, false)
           end
         end
       end
