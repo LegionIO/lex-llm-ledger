@@ -170,7 +170,10 @@ module Legion
             def find_or_create_response(db, request, response_message, body)
               response_uuid = stable_uuid(reference(body, :provider_response_ref) || "response:#{request_ref(body)}")
               existing = db[:llm_message_inference_responses].where(uuid: response_uuid).first
-              return existing if existing
+              if existing
+                enrich_response!(db, existing, response_message, body)
+                return existing
+              end
 
               id = insert_row(db, :llm_message_inference_responses, {
                                 uuid:                         response_uuid,
@@ -194,6 +197,26 @@ module Legion
                                 inserted_at:                  Time.now.utc
                               }, operation: 'official_record_writer.inference_response')
               db[:llm_message_inference_responses][id: id]
+            end
+
+            def enrich_response!(db, existing, response_message, body)
+              updates = {}
+              updates[:response_message_id] = response_message[:id] if response_message && existing[:response_message_id].nil?
+              updates[:tier] = tier(body) if existing[:tier].nil? && tier(body)
+              updates[:provider_instance] = provider_instance(body) if existing[:provider_instance].nil? && provider_instance(body)
+              updates[:finish_reason] = finish_reason(body) if existing[:finish_reason].nil? && finish_reason(body)
+              updates[:dispatch_path] = (body[:dispatch_path] || body[:tier]) if existing[:dispatch_path].nil?
+
+              response_json = json_dump(visible_response(body))
+              updates[:response_json] = response_json if existing[:response_json].to_s == '{}' && response_json != '{}'
+
+              thinking_json = json_dump(thinking_response(body))
+              updates[:response_thinking_json] = thinking_json if existing[:response_thinking_json].to_s == '{}' && thinking_json != '{}'
+
+              return if updates.empty?
+
+              db[:llm_message_inference_responses].where(id: existing[:id]).update(updates)
+              log.info("[ledger] enriched response id=#{existing[:id]} fields=#{updates.keys.join(',')}")
             end
 
             def find_or_create_metric(db, request, response, body)

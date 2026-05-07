@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.7] - 2026-05-07
+
+### Fixed
+- Enrich existing inference response rows when a richer payload arrives (prompt audit backfills `response_message_id`, `response_json`, `tier`, `finish_reason` that metering left null).
+
 ## [0.2.6] - 2026-05-07
 
 ### Fixed
