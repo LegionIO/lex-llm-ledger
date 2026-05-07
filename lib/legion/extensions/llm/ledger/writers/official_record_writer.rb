@@ -287,23 +287,29 @@ module Legion
             end
 
             def caller_identity(body)
-              body[:caller_identity_id] ||
-                body.dig(:identity, :identity) ||
-                body.dig(:caller, :requested_by, :identity) ||
-                body.dig(:caller, :requested_by, :canonical_name) ||
-                body.dig(:caller, :requested_by, :id)
+              integer_or_nil(body[:caller_identity_id] || body.dig(:caller, :requested_by, :id))
             end
 
             def caller_principal(body)
-              body[:caller_principal_id] ||
-                body.dig(:identity, :principal) ||
-                body.dig(:caller, :requested_by, :principal_id)
+              integer_or_nil(body[:caller_principal_id] || body.dig(:caller, :requested_by, :principal_id))
             end
 
             def caller_type(body)
               body[:caller_type] ||
+                body[:caller_identity] ||
+                body.dig(:identity, :identity) ||
+                body.dig(:caller, :requested_by, :identity) ||
+                body.dig(:caller, :requested_by, :canonical_name) ||
                 body.dig(:identity, :type) ||
                 body.dig(:caller, :source)
+            end
+
+            def integer_or_nil(value)
+              return nil if value.nil?
+              return value if value.is_a?(Integer)
+
+              int = value.to_s.to_i
+              int.positive? ? int : nil
             end
 
             def correlation_id(body)
