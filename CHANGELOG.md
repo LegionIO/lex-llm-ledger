@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.4] - 2026-05-06
+
+### Fixed
+- Disable generated remote-invocation meta actors by default so ledger audit queues are consumed only by ledger-owned subscription actors.
+- Route ledger subscription actor payload decoding through the ledger decoder so encrypted audit messages preserve metadata and missing-IV messages dead-letter before core decryption.
+
 ## [0.2.3] - 2026-05-06
 
 ### Fixed

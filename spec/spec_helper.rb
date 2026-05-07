@@ -31,6 +31,8 @@ module Legion
     end
 
     module Actors
+      class UnrecoverableMessageError < StandardError; end
+
       class Subscription
         include Legion::Logging::Helper
       end
@@ -79,6 +81,7 @@ require 'legion/extensions/llm/ledger/helpers/queries'
 require 'legion/extensions/llm/ledger/helpers/retention'
 require 'legion/extensions/llm/ledger/helpers/decryption'
 require 'legion/extensions/llm/ledger/helpers/subscription_message'
+require 'legion/extensions/llm/ledger/helpers/subscription_actor'
 require 'legion/extensions/llm/ledger/helpers/caller_identity'
 require 'legion/extensions/llm/ledger/runners/metering'
 require 'legion/extensions/llm/ledger/runners/prompts'

@@ -49,13 +49,15 @@ module Legion
             def decrypt_payload(message, headers, properties)
               return message unless properties[:content_encoding] == 'encrypted/cs'
 
-              iv = headers['iv'] || headers[:iv]
-              raise DecryptionFailed, 'Encrypted audit record is missing iv header' if iv.nil?
-
-              Legion::Crypt.decrypt(message, iv)
+              Decryption.decrypt_if_needed(
+                message,
+                headers:    headers,
+                properties: properties
+              )
             end
 
             def parse_payload(payload, properties)
+              return payload if payload.is_a?(Hash)
               return payload unless properties[:content_type] == 'application/json'
 
               Json.load(payload)

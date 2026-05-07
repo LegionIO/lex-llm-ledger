@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require 'legion/extensions/actors/subscription'
-require_relative '../helpers/subscription_message'
+require_relative '../helpers/subscription_actor'
 
 module Legion
   module Extensions
@@ -9,6 +9,8 @@ module Legion
       module Ledger
         module Actor
           class MeteringWriter < Legion::Extensions::Actors::Subscription
+            include Helpers::SubscriptionActor
+
             def runner_class = Legion::Extensions::Llm::Ledger::Runners::Metering
 
             def runner_function
