@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.8] - 2026-05-07
+
+### Fixed
+- Extract caller identity from audit event structure (`identity.identity`, `caller.requested_by.identity`) instead of missing top-level `caller_identity_id` / `caller_principal_id` keys.
+- Enrich existing request rows when prompt audit arrives after metering (backfills `caller_identity_id`, `caller_principal_id`, `runtime_caller_type`, `request_json`, `context_message_count`).
+
 ## [0.2.7] - 2026-05-07
 
 ### Fixed

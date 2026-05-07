@@ -105,16 +105,19 @@ module Legion
             def find_or_create_request(db, conversation, latest_message, body)
               request_id = request_ref(body)
               existing = db[:llm_message_inference_requests].where(request_ref: request_id).first
-              return existing if existing
+              if existing
+                enrich_request!(db, existing, body)
+                return existing
+              end
 
               operation = operation(body)
               id = insert_row(db, :llm_message_inference_requests, {
                                 uuid:                  stable_uuid(request_id),
                                 conversation_id:       conversation[:id],
                                 latest_message_id:     latest_message[:id],
-                                caller_principal_id:   body[:caller_principal_id],
-                                caller_identity_id:    body[:caller_identity_id],
-                                runtime_caller_type:   body[:caller_type],
+                                caller_principal_id:   caller_principal(body),
+                                caller_identity_id:    caller_identity(body),
+                                runtime_caller_type:   caller_type(body),
                                 request_ref:           request_id,
                                 correlation_ref:       correlation_id(body),
                                 correlation_id:        correlation_id(body),
@@ -263,6 +266,44 @@ module Legion
               return if response_message[:message_inference_response_id] == response[:id]
 
               db[:llm_messages].where(id: response_message[:id]).update(message_inference_response_id: response[:id])
+            end
+
+            def enrich_request!(db, existing, body)
+              updates = {}
+              updates[:caller_identity_id] = caller_identity(body) if existing[:caller_identity_id].nil? && caller_identity(body)
+              updates[:caller_principal_id] = caller_principal(body) if existing[:caller_principal_id].nil? && caller_principal(body)
+              updates[:runtime_caller_type] = caller_type(body) if existing[:runtime_caller_type].nil? && caller_type(body)
+
+              request_json = json_dump(request_payload(body))
+              updates[:request_json] = request_json if existing[:request_json].to_s == '{}' && request_json != '{}'
+
+              msg_count = Array(body.dig(:request, :messages) || body[:messages]).size
+              updates[:context_message_count] = msg_count if existing[:context_message_count].to_i.zero? && msg_count.positive?
+
+              return if updates.empty?
+
+              db[:llm_message_inference_requests].where(id: existing[:id]).update(updates)
+              log.info("[ledger] enriched request id=#{existing[:id]} fields=#{updates.keys.join(',')}")
+            end
+
+            def caller_identity(body)
+              body[:caller_identity_id] ||
+                body.dig(:identity, :identity) ||
+                body.dig(:caller, :requested_by, :identity) ||
+                body.dig(:caller, :requested_by, :canonical_name) ||
+                body.dig(:caller, :requested_by, :id)
+            end
+
+            def caller_principal(body)
+              body[:caller_principal_id] ||
+                body.dig(:identity, :principal) ||
+                body.dig(:caller, :requested_by, :principal_id)
+            end
+
+            def caller_type(body)
+              body[:caller_type] ||
+                body.dig(:identity, :type) ||
+                body.dig(:caller, :source)
             end
 
             def correlation_id(body)
