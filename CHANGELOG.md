@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.6] - 2026-05-07
+
+### Fixed
+- Add `Legion::Logging::Helper` to `OfficialRecordWriter` so `log` is available in rescue blocks.
+- Wrap message inserts in savepoints so PostgreSQL unique constraint violations don't poison the parent transaction and cause `PG::InFailedSqlTransaction` on the fallback query.
+
 ## [0.2.5] - 2026-05-06
 
 ### Fixed

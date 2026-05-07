@@ -2,6 +2,7 @@
 
 require 'digest'
 require 'securerandom'
+require 'legion/logging'
 require_relative '../helpers/json'
 require_relative '../helpers/persistence_logging'
 
@@ -11,6 +12,8 @@ module Legion
       module Ledger
         module Writers
           module OfficialRecordWriter
+            extend Legion::Logging::Helper
+
             module_function
 
             def write_prompt(payload)
@@ -76,19 +79,27 @@ module Legion
               return existing if existing
 
               seq = body[:message_seq] ? integer(body[:message_seq]) : next_message_seq(db, conversation)
-              id = insert_row(db, :llm_messages, {
-                                uuid:            uuid,
-                                conversation_id: conversation[:id],
-                                seq:             seq,
-                                role:            'user',
-                                content_type:    'text',
-                                content:         request_content(body),
-                                input_tokens:    tokens(body)[:input_tokens],
-                                output_tokens:   0,
-                                created_at:      recorded_at(body),
-                                inserted_at:     Time.now.utc
-                              }, operation: 'official_record_writer.user_message')
-              db[:llm_messages][id: id]
+              begin
+                id = db.transaction(savepoint: true) do
+                  insert_row(db, :llm_messages, {
+                               uuid:            uuid,
+                               conversation_id: conversation[:id],
+                               seq:             seq,
+                               role:            'user',
+                               content_type:    'text',
+                               content:         request_content(body),
+                               input_tokens:    tokens(body)[:input_tokens],
+                               output_tokens:   0,
+                               created_at:      recorded_at(body),
+                               inserted_at:     Time.now.utc
+                             }, operation: 'official_record_writer.user_message')
+                end
+                db[:llm_messages][id: id]
+              rescue Sequel::UniqueConstraintViolation => e
+                log.debug("[ledger] seq collision resolved uuid=#{uuid} conversation_id=#{conversation[:id]} error=#{e.class}")
+                db[:llm_messages].where(uuid: uuid).first ||
+                  db[:llm_messages].where(conversation_id: conversation[:id], seq: seq).first
+              end
             end
 
             def find_or_create_request(db, conversation, latest_message, body)
@@ -130,21 +141,30 @@ module Legion
               return existing if existing
 
               latest = db[:llm_messages][id: request[:latest_message_id]]
-              id = insert_row(db, :llm_messages, {
-                                uuid:                         uuid,
-                                conversation_id:              conversation[:id],
-                                parent_message_id:            latest&.dig(:id),
-                                message_inference_request_id: request[:id],
-                                seq:                          (latest&.dig(:seq) || 1) + 1,
-                                role:                         'assistant',
-                                content_type:                 'text',
-                                content:                      response_content(body),
-                                input_tokens:                 0,
-                                output_tokens:                tokens(body)[:output_tokens],
-                                created_at:                   recorded_at(body),
-                                inserted_at:                  Time.now.utc
-                              }, operation: 'official_record_writer.response_message')
-              db[:llm_messages][id: id]
+              seq = (latest&.dig(:seq) || 1) + 1
+              begin
+                id = db.transaction(savepoint: true) do
+                  insert_row(db, :llm_messages, {
+                               uuid:                         uuid,
+                               conversation_id:              conversation[:id],
+                               parent_message_id:            latest&.dig(:id),
+                               message_inference_request_id: request[:id],
+                               seq:                          seq,
+                               role:                         'assistant',
+                               content_type:                 'text',
+                               content:                      response_content(body),
+                               input_tokens:                 0,
+                               output_tokens:                tokens(body)[:output_tokens],
+                               created_at:                   recorded_at(body),
+                               inserted_at:                  Time.now.utc
+                             }, operation: 'official_record_writer.response_message')
+                end
+                db[:llm_messages][id: id]
+              rescue Sequel::UniqueConstraintViolation => e
+                log.debug("[ledger] seq collision resolved uuid=#{uuid} conversation_id=#{conversation[:id]} error=#{e.class}")
+                db[:llm_messages].where(uuid: uuid).first ||
+                  db[:llm_messages].where(conversation_id: conversation[:id], seq: seq).first
+              end
             end
 
             def find_or_create_response(db, request, response_message, body)
