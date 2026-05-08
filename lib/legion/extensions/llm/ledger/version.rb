@@ -4,7 +4,7 @@ module Legion
   module Extensions
     module Llm
       module Ledger
-        VERSION = '0.2.9'
+        VERSION = '0.3.0'
       end
     end
   end

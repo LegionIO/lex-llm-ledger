@@ -123,13 +123,13 @@ RSpec.configure do |config|
       llm_message_inference_requests
       llm_messages
       llm_conversations
-      portable_identity_group_memberships
-      portable_identity_audit_log
-      portable_identities
-      portable_identity_groups
-      portable_identity_principals
-      portable_identity_provider_capabilities
-      portable_identity_providers
+      identity_group_memberships
+      identity_audit_log
+      identities
+      identity_groups
+      identity_principals
+      identity_provider_capabilities
+      identity_providers
     ].each do |table|
       Legion::Data.connection[table].delete if Legion::Data.connection.table_exists?(table)
     end

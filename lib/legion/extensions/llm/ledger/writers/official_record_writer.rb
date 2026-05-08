@@ -322,11 +322,11 @@ module Legion
                 refs = { principal_id: explicit_principal_id, identity_id: explicit_identity_id }.compact
                 unless refs[:principal_id] && refs[:identity_id]
                   if explicit_identity_id && !explicit_principal_id && identity_tables_available?(db)
-                    row = db[:portable_identities].where(id: explicit_identity_id).first
+                    row = db[:identities].where(id: explicit_identity_id).first
                     refs[:principal_id] = row[:principal_id] if row
                   end
 
-                  resolved = resolve_portable_identity(db, body)
+                  resolved = resolve_identity(db, body)
                   refs[:principal_id] ||= resolved[:principal_id]
                   refs[:identity_id] ||= resolved[:identity_id]
                 end
@@ -334,7 +334,7 @@ module Legion
               end
             end
 
-            def resolve_portable_identity(db, body)
+            def resolve_identity(db, body)
               return {} unless identity_tables_available?(db)
 
               descriptor = parsed_identity_descriptor(body)
@@ -342,7 +342,7 @@ module Legion
 
               provider = find_or_create_identity_provider(db, descriptor[:provider_name])
               principal = find_or_create_identity_principal(db, descriptor)
-              identity = find_or_create_portable_identity(db, principal, provider, descriptor)
+              identity = find_or_create_identity(db, principal, provider, descriptor)
 
               { principal_id: principal[:id], identity_id: identity[:id] }
             rescue StandardError => e
@@ -392,12 +392,12 @@ module Legion
             end
 
             def find_or_create_identity_provider(db, provider_name)
-              table = db[:portable_identity_providers]
+              table = db[:identity_providers]
               existing = table.where(name: provider_name).first
               return existing if existing
 
-              id = insert_row(db, :portable_identity_providers, {
-                                uuid:          deterministic_uuid("portable_identity_provider:#{provider_name}"),
+              id = insert_row(db, :identity_providers, {
+                                uuid:          deterministic_uuid("identity_provider:#{provider_name}"),
                                 name:          provider_name,
                                 provider_type: provider_name == 'local' ? 'local' : 'external',
                                 facing:        'internal',
@@ -412,12 +412,12 @@ module Legion
             end
 
             def find_or_create_identity_principal(db, descriptor)
-              table = db[:portable_identity_principals]
+              table = db[:identity_principals]
               existing = table.where(canonical_name: descriptor[:canonical_name], kind: descriptor[:kind]).first
               return existing if existing
 
-              id = insert_row(db, :portable_identity_principals, {
-                                uuid:           deterministic_uuid("portable_identity_principal:#{descriptor[:kind]}:#{descriptor[:canonical_name]}"),
+              id = insert_row(db, :identity_principals, {
+                                uuid:           deterministic_uuid("identity_principal:#{descriptor[:kind]}:#{descriptor[:canonical_name]}"),
                                 canonical_name: descriptor[:canonical_name],
                                 kind:           descriptor[:kind],
                                 display_name:   descriptor[:canonical_name],
@@ -431,8 +431,8 @@ module Legion
               table.where(canonical_name: descriptor[:canonical_name], kind: descriptor[:kind]).first
             end
 
-            def find_or_create_portable_identity(db, principal, provider, descriptor)
-              table = db[:portable_identities]
+            def find_or_create_identity(db, principal, provider, descriptor)
+              table = db[:identities]
               existing = table.where(
                 principal_id:          principal[:id],
                 provider_id:           provider[:id],
@@ -440,8 +440,8 @@ module Legion
               ).first
               return existing if existing
 
-              uuid_key = "portable_identity:#{principal[:id]}:#{provider[:id]}:#{descriptor[:provider_identity_key]}"
-              id = insert_row(db, :portable_identities, {
+              uuid_key = "identity:#{principal[:id]}:#{provider[:id]}:#{descriptor[:provider_identity_key]}"
+              id = insert_row(db, :identities, {
                                 uuid:                  deterministic_uuid(uuid_key),
                                 principal_id:          principal[:id],
                                 provider_id:           provider[:id],
@@ -451,18 +451,18 @@ module Legion
                                 is_default:            true,
                                 created_at:            Time.now.utc,
                                 updated_at:            Time.now.utc
-                              }, operation: 'official_record_writer.portable_identity')
+                              }, operation: 'official_record_writer.identity')
               table[id: id]
             rescue Sequel::UniqueConstraintViolation => e
-              handle_exception(e, level: :debug, handled: true, operation: 'official_record_writer.portable_identity_race')
+              handle_exception(e, level: :debug, handled: true, operation: 'official_record_writer.identity_race')
               table.where(principal_id: principal[:id], provider_id: provider[:id],
                           provider_identity_key: descriptor[:provider_identity_key]).first
             end
 
             def identity_tables_available?(db)
-              db.table_exists?(:portable_identity_providers) &&
-                db.table_exists?(:portable_identity_principals) &&
-                db.table_exists?(:portable_identities)
+              db.table_exists?(:identity_providers) &&
+                db.table_exists?(:identity_principals) &&
+                db.table_exists?(:identities)
             end
 
             def normalize_caller_type(value)

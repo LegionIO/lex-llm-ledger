@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.0] - 2026-05-08
+
+### Changed
+- Renamed all `portable_identity_*` table references to canonical identity table names (`identities`, `identity_principals`, `identity_providers`).
+- Renamed internal methods: `resolve_portable_identity` → `resolve_identity`, `find_or_create_portable_identity` → `find_or_create_identity`.
+
 ## [0.2.9] - 2026-05-07
 
 ### Fixed

@@ -89,8 +89,8 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Writers::OfficialPromptWriter do
       )
     )
 
-    principal = Legion::Data.connection[:portable_identity_principals].first
-    identity = Legion::Data.connection[:portable_identities].first
+    principal = Legion::Data.connection[:identity_principals].first
+    identity = Legion::Data.connection[:identities].first
     request = Legion::Data.connection[:llm_message_inference_requests].first
 
     expect(principal).to include(canonical_name: 'matt@example.com', kind: 'human')
