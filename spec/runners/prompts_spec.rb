@@ -119,7 +119,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Prompts do
       expect(row[:expires_at]).to be_nil
     end
 
-    it 'normalizes caller identity from namespaced ids and current transport headers' do
+    it 'prefers current transport publisher identity over stale caller ids' do
       decrypted_body[:caller] = {
         requested_by: {
           id:       'system:system',
@@ -127,8 +127,9 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Prompts do
           type:     'service'
         }
       }
-      metadata[:headers]['x-legion-identity'] = 'system:system'
-      metadata[:headers]['x-legion-caller-type'] = 'service'
+      decrypted_body[:identity] = { identity: 'matt@example.com', type: 'human' }
+      metadata[:headers]['x-legion-identity'] = 'matt@example.com'
+      metadata[:headers]['x-legion-caller-type'] = 'human'
 
       official_payload = described_class.send(
         :official_context_payload,
@@ -138,8 +139,8 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Prompts do
         metadata[:headers]
       ).merge(described_class.send(:official_identity_payload, decrypted_body, metadata[:headers]))
 
-      expect(official_payload[:caller_identity]).to eq('system:system')
-      expect(official_payload[:caller_type]).to eq('service')
+      expect(official_payload[:caller_identity]).to eq('matt@example.com')
+      expect(official_payload[:caller_type]).to eq('human')
     end
 
     it 'propagates DecryptionFailed for missing iv headers (NACK without requeue)' do

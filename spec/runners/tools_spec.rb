@@ -104,7 +104,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Tools do
       expect(row[:tool_name]).to eq('list_files')
     end
 
-    it 'stores namespaced caller ids instead of ambiguous display identities' do
+    it 'stores current transport publisher identity instead of stale caller ids' do
       decrypted_body[:caller] = {
         requested_by: {
           id:       'system:system',
@@ -112,13 +112,14 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Tools do
           type:     'service'
         }
       }
-      metadata[:headers]['x-legion-identity'] = 'system:system'
-      metadata[:headers]['x-legion-caller-type'] = 'service'
+      decrypted_body[:identity] = { identity: 'matt@example.com', type: 'human' }
+      metadata[:headers]['x-legion-identity'] = 'matt@example.com'
+      metadata[:headers]['x-legion-caller-type'] = 'human'
 
       described_class.write_tool_record(decrypted_body, metadata)
 
       row = Legion::Data.connection[:llm_tool_records].first
-      expect(row[:caller_identity]).to eq('system:system')
+      expect(row[:caller_identity]).to eq('matt@example.com')
     end
 
     it 'applies PHI TTL cap' do

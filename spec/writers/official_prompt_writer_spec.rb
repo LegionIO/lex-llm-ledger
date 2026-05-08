@@ -80,4 +80,23 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Writers::OfficialPromptWriter do
     assistant_message = Legion::Data.connection[:llm_messages].where(role: 'assistant').first
     expect(assistant_message[:message_inference_request_id]).to eq(request[:id])
   end
+
+  it 'resolves canonical caller identity strings into portable identity foreign keys' do
+    described_class.write(
+      payload.merge(
+        caller_identity: 'matt@example.com',
+        identity:        { identity: 'matt@example.com', type: 'human', credential: 'system' }
+      )
+    )
+
+    principal = Legion::Data.connection[:portable_identity_principals].first
+    identity = Legion::Data.connection[:portable_identities].first
+    request = Legion::Data.connection[:llm_message_inference_requests].first
+
+    expect(principal).to include(canonical_name: 'matt@example.com', kind: 'human')
+    expect(identity).to include(principal_id: principal[:id], provider_identity_key: 'matt@example.com')
+    expect(request[:caller_principal_id]).to eq(principal[:id])
+    expect(request[:caller_identity_id]).to eq(identity[:id])
+    expect(request[:runtime_caller_type]).to eq('human')
+  end
 end

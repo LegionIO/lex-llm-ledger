@@ -17,21 +17,21 @@ module Legion
               identity_hash = identity.is_a?(Hash) ? identity : {}
               extension = hash_value(caller_hash, :extension)
               type = first_present(
-                hash_value(caller, :type),
                 hash_value(identity_hash, :type),
                 header_value(headers, 'x-legion-caller-type'),
+                hash_value(caller, :type),
                 extension && 'extension'
               )
 
               raw_identity = first_present(
-                hash_value(caller, :id),
-                hash_value(caller, :canonical_name),
                 hash_value(identity_hash, :id),
                 hash_value(identity_hash, :canonical_name),
                 hash_value(identity_hash, :identity),
                 hash_value(identity_hash, :username),
                 header_value(headers, 'x-legion-identity'),
                 header_value(headers, 'x-legion-caller-identity'),
+                hash_value(caller, :id),
+                hash_value(caller, :canonical_name),
                 hash_value(caller, :identity),
                 hash_value(caller, :username),
                 extension && "extension:#{extension}"

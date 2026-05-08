@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.9] - 2026-05-07
+
+### Fixed
+- Prefer current publisher identity payloads and AMQP identity headers over stale `caller.requested_by.id` values when normalizing prompt, metering, and tool audit events.
+- Resolve canonical caller identity strings into portable identity provider, principal, and identity rows before writing official inference request foreign keys.
+- Store `runtime_caller_type` from explicit type fields instead of identity strings.
+
 ## [0.2.8] - 2026-05-07
 
 ### Fixed

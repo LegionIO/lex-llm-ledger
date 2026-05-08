@@ -102,7 +102,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Metering do
       expect(row[:thinking_tokens]).to eq(0)
     end
 
-    it 'normalizes caller identity from namespaced ids and current transport headers' do
+    it 'prefers current transport publisher identity over stale caller ids' do
       payload[:caller] = {
         requested_by: {
           id:       'system:system',
@@ -110,9 +110,10 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Metering do
           type:     'service'
         }
       }
+      payload[:identity] = { identity: 'matt@example.com', type: 'human' }
       metadata[:headers] = {
-        'x-legion-identity'    => 'system:system',
-        'x-legion-caller-type' => 'service'
+        'x-legion-identity'    => 'matt@example.com',
+        'x-legion-caller-type' => 'human'
       }
 
       official_payload = described_class.send(
@@ -123,13 +124,13 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Metering do
         metadata[:headers]
       )
 
-      expect(official_payload[:caller_identity]).to eq('system:system')
-      expect(official_payload[:caller_type]).to eq('service')
+      expect(official_payload[:caller_identity]).to eq('matt@example.com')
+      expect(official_payload[:caller_type]).to eq('human')
     end
 
     it 'prefers normalized event identity over ambiguous display identity' do
       payload[:caller] = { requested_by: { identity: 'system', type: 'service' } }
-      payload[:identity] = { identity: 'system:system', type: 'service' }
+      payload[:identity] = { identity: 'matt@example.com', type: 'human' }
 
       official_payload = described_class.send(
         :official_metering_payload,
@@ -139,8 +140,8 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Metering do
         metadata[:headers]
       )
 
-      expect(official_payload[:caller_identity]).to eq('system:system')
-      expect(official_payload[:caller_type]).to eq('service')
+      expect(official_payload[:caller_identity]).to eq('matt@example.com')
+      expect(official_payload[:caller_type]).to eq('human')
     end
   end
 end
