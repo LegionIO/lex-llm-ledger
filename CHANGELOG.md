@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.2.9] - 2026-05-07
+
+### Fixed
+- Prefer current publisher identity payloads and AMQP identity headers over stale `caller.requested_by.id` values when normalizing prompt, metering, and tool audit events.
+- Resolve canonical caller identity strings into portable identity provider, principal, and identity rows before writing official inference request foreign keys.
+- Store `runtime_caller_type` from explicit type fields instead of identity strings.
+
+## [0.2.8] - 2026-05-07
+
+### Fixed
+- Extract caller identity from audit event structure (`identity.identity`, `caller.requested_by.identity`) instead of missing top-level `caller_identity_id` / `caller_principal_id` keys.
+- Enrich existing request rows when prompt audit arrives after metering (backfills `caller_identity_id`, `caller_principal_id`, `runtime_caller_type`, `request_json`, `context_message_count`).
+
+## [0.2.7] - 2026-05-07
+
+### Fixed
+- Enrich existing inference response rows when a richer payload arrives (prompt audit backfills `response_message_id`, `response_json`, `tier`, `finish_reason` that metering left null).
+
+## [0.2.6] - 2026-05-07
+
+### Fixed
+- Add `Legion::Logging::Helper` to `OfficialRecordWriter` so `log` is available in rescue blocks.
+- Wrap message inserts in savepoints so PostgreSQL unique constraint violations don't poison the parent transaction and cause `PG::InFailedSqlTransaction` on the fallback query.
+
 ## [0.2.5] - 2026-05-06
 
 ### Fixed

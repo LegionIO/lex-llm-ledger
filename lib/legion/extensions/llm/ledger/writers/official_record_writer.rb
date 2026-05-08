@@ -2,6 +2,7 @@
 
 require 'digest'
 require 'securerandom'
+require 'legion/logging'
 require_relative '../helpers/json'
 require_relative '../helpers/persistence_logging'
 
@@ -11,6 +12,8 @@ module Legion
       module Ledger
         module Writers
           module OfficialRecordWriter
+            extend Legion::Logging::Helper
+
             module_function
 
             def write_prompt(payload)
@@ -76,34 +79,46 @@ module Legion
               return existing if existing
 
               seq = body[:message_seq] ? integer(body[:message_seq]) : next_message_seq(db, conversation)
-              id = insert_row(db, :llm_messages, {
-                                uuid:            uuid,
-                                conversation_id: conversation[:id],
-                                seq:             seq,
-                                role:            'user',
-                                content_type:    'text',
-                                content:         request_content(body),
-                                input_tokens:    tokens(body)[:input_tokens],
-                                output_tokens:   0,
-                                created_at:      recorded_at(body),
-                                inserted_at:     Time.now.utc
-                              }, operation: 'official_record_writer.user_message')
-              db[:llm_messages][id: id]
+              begin
+                id = db.transaction(savepoint: true) do
+                  insert_row(db, :llm_messages, {
+                               uuid:            uuid,
+                               conversation_id: conversation[:id],
+                               seq:             seq,
+                               role:            'user',
+                               content_type:    'text',
+                               content:         request_content(body),
+                               input_tokens:    tokens(body)[:input_tokens],
+                               output_tokens:   0,
+                               created_at:      recorded_at(body),
+                               inserted_at:     Time.now.utc
+                             }, operation: 'official_record_writer.user_message')
+                end
+                db[:llm_messages][id: id]
+              rescue Sequel::UniqueConstraintViolation => e
+                log.debug("[ledger] seq collision resolved uuid=#{uuid} conversation_id=#{conversation[:id]} error=#{e.class}")
+                db[:llm_messages].where(uuid: uuid).first ||
+                  db[:llm_messages].where(conversation_id: conversation[:id], seq: seq).first
+              end
             end
 
             def find_or_create_request(db, conversation, latest_message, body)
               request_id = request_ref(body)
               existing = db[:llm_message_inference_requests].where(request_ref: request_id).first
-              return existing if existing
+              if existing
+                enrich_request!(db, existing, body)
+                return existing
+              end
 
               operation = operation(body)
+              caller_refs = caller_identity_refs(db, body)
               id = insert_row(db, :llm_message_inference_requests, {
                                 uuid:                  stable_uuid(request_id),
                                 conversation_id:       conversation[:id],
                                 latest_message_id:     latest_message[:id],
-                                caller_principal_id:   body[:caller_principal_id],
-                                caller_identity_id:    body[:caller_identity_id],
-                                runtime_caller_type:   body[:caller_type],
+                                caller_principal_id:   caller_refs[:principal_id],
+                                caller_identity_id:    caller_refs[:identity_id],
+                                runtime_caller_type:   caller_type(body),
                                 request_ref:           request_id,
                                 correlation_ref:       correlation_id(body),
                                 correlation_id:        correlation_id(body),
@@ -130,27 +145,39 @@ module Legion
               return existing if existing
 
               latest = db[:llm_messages][id: request[:latest_message_id]]
-              id = insert_row(db, :llm_messages, {
-                                uuid:                         uuid,
-                                conversation_id:              conversation[:id],
-                                parent_message_id:            latest&.dig(:id),
-                                message_inference_request_id: request[:id],
-                                seq:                          (latest&.dig(:seq) || 1) + 1,
-                                role:                         'assistant',
-                                content_type:                 'text',
-                                content:                      response_content(body),
-                                input_tokens:                 0,
-                                output_tokens:                tokens(body)[:output_tokens],
-                                created_at:                   recorded_at(body),
-                                inserted_at:                  Time.now.utc
-                              }, operation: 'official_record_writer.response_message')
-              db[:llm_messages][id: id]
+              seq = (latest&.dig(:seq) || 1) + 1
+              begin
+                id = db.transaction(savepoint: true) do
+                  insert_row(db, :llm_messages, {
+                               uuid:                         uuid,
+                               conversation_id:              conversation[:id],
+                               parent_message_id:            latest&.dig(:id),
+                               message_inference_request_id: request[:id],
+                               seq:                          seq,
+                               role:                         'assistant',
+                               content_type:                 'text',
+                               content:                      response_content(body),
+                               input_tokens:                 0,
+                               output_tokens:                tokens(body)[:output_tokens],
+                               created_at:                   recorded_at(body),
+                               inserted_at:                  Time.now.utc
+                             }, operation: 'official_record_writer.response_message')
+                end
+                db[:llm_messages][id: id]
+              rescue Sequel::UniqueConstraintViolation => e
+                log.debug("[ledger] seq collision resolved uuid=#{uuid} conversation_id=#{conversation[:id]} error=#{e.class}")
+                db[:llm_messages].where(uuid: uuid).first ||
+                  db[:llm_messages].where(conversation_id: conversation[:id], seq: seq).first
+              end
             end
 
             def find_or_create_response(db, request, response_message, body)
               response_uuid = stable_uuid(reference(body, :provider_response_ref) || "response:#{request_ref(body)}")
               existing = db[:llm_message_inference_responses].where(uuid: response_uuid).first
-              return existing if existing
+              if existing
+                enrich_response!(db, existing, response_message, body)
+                return existing
+              end
 
               id = insert_row(db, :llm_message_inference_responses, {
                                 uuid:                         response_uuid,
@@ -174,6 +201,34 @@ module Legion
                                 inserted_at:                  Time.now.utc
                               }, operation: 'official_record_writer.inference_response')
               db[:llm_message_inference_responses][id: id]
+            end
+
+            def enrich_response!(db, existing, response_message, body)
+              updates = {}
+              update_if_missing(updates, existing, :response_message_id, response_message&.dig(:id))
+              update_if_missing(updates, existing, :tier, tier(body))
+              update_if_missing(updates, existing, :provider_instance, provider_instance(body))
+              update_if_missing(updates, existing, :finish_reason, finish_reason(body))
+              update_if_missing(updates, existing, :dispatch_path, body[:dispatch_path] || body[:tier])
+
+              response_json = json_dump(visible_response(body))
+              update_if_placeholder(updates, existing, :response_json, response_json)
+
+              thinking_json = json_dump(thinking_response(body))
+              update_if_placeholder(updates, existing, :response_thinking_json, thinking_json)
+
+              return if updates.empty?
+
+              db[:llm_message_inference_responses].where(id: existing[:id]).update(updates)
+              log.info("[ledger] enriched response id=#{existing[:id]} fields=#{updates.keys.join(',')}")
+            end
+
+            def update_if_missing(updates, existing, key, value)
+              updates[key] = value if existing[key].nil? && present?(value)
+            end
+
+            def update_if_placeholder(updates, existing, key, value)
+              updates[key] = value if existing[key].to_s == '{}' && value != '{}'
             end
 
             def find_or_create_metric(db, request, response, body)
@@ -220,6 +275,216 @@ module Legion
               return if response_message[:message_inference_response_id] == response[:id]
 
               db[:llm_messages].where(id: response_message[:id]).update(message_inference_response_id: response[:id])
+            end
+
+            def enrich_request!(db, existing, body)
+              updates = {}
+              caller_refs = caller_identity_refs(db, body)
+              updates[:caller_identity_id] = caller_refs[:identity_id] if existing[:caller_identity_id].nil? && caller_refs[:identity_id]
+              updates[:caller_principal_id] = caller_refs[:principal_id] if existing[:caller_principal_id].nil? && caller_refs[:principal_id]
+              updates[:runtime_caller_type] = caller_type(body) if existing[:runtime_caller_type].nil? && caller_type(body)
+
+              request_json = json_dump(request_payload(body))
+              updates[:request_json] = request_json if existing[:request_json].to_s == '{}' && request_json != '{}'
+
+              msg_count = Array(body.dig(:request, :messages) || body[:messages]).size
+              updates[:context_message_count] = msg_count if existing[:context_message_count].to_i.zero? && msg_count.positive?
+
+              return if updates.empty?
+
+              db[:llm_message_inference_requests].where(id: existing[:id]).update(updates)
+              log.info("[ledger] enriched request id=#{existing[:id]} fields=#{updates.keys.join(',')}")
+            end
+
+            def caller_identity(body)
+              caller_identity_refs(::Legion::Data.connection, body)[:identity_id]
+            end
+
+            def caller_principal(body)
+              caller_identity_refs(::Legion::Data.connection, body)[:principal_id]
+            end
+
+            def caller_type(body)
+              raw_type = body[:caller_type] ||
+                         body.dig(:identity, :type) ||
+                         body.dig(:caller, :requested_by, :type) ||
+                         body.dig(:caller, :source)
+              return normalize_caller_type(raw_type) if present?(raw_type)
+
+              parsed_identity_descriptor(body)[:kind]
+            end
+
+            def caller_identity_refs(db, body)
+              body[:__ledger_caller_identity_refs] ||= begin
+                explicit_identity_id = integer_or_nil(body[:caller_identity_id] || body.dig(:caller, :requested_by, :id))
+                explicit_principal_id = integer_or_nil(body[:caller_principal_id] ||
+                                                       body.dig(:caller, :requested_by, :principal_id))
+                refs = { principal_id: explicit_principal_id, identity_id: explicit_identity_id }.compact
+                unless refs[:principal_id] && refs[:identity_id]
+                  if explicit_identity_id && !explicit_principal_id && identity_tables_available?(db)
+                    row = db[:portable_identities].where(id: explicit_identity_id).first
+                    refs[:principal_id] = row[:principal_id] if row
+                  end
+
+                  resolved = resolve_portable_identity(db, body)
+                  refs[:principal_id] ||= resolved[:principal_id]
+                  refs[:identity_id] ||= resolved[:identity_id]
+                end
+                refs.compact
+              end
+            end
+
+            def resolve_portable_identity(db, body)
+              return {} unless identity_tables_available?(db)
+
+              descriptor = parsed_identity_descriptor(body)
+              return {} unless present?(descriptor[:canonical_name])
+
+              provider = find_or_create_identity_provider(db, descriptor[:provider_name])
+              principal = find_or_create_identity_principal(db, descriptor)
+              identity = find_or_create_portable_identity(db, principal, provider, descriptor)
+
+              { principal_id: principal[:id], identity_id: identity[:id] }
+            rescue StandardError => e
+              handle_exception(e, level: :warn, handled: true, operation: 'official_record_writer.identity_resolution')
+              {}
+            end
+
+            def parsed_identity_descriptor(body)
+              raw_identity = body[:caller_identity] ||
+                             body.dig(:identity, :identity) ||
+                             body.dig(:identity, :canonical_name) ||
+                             body.dig(:caller, :requested_by, :identity) ||
+                             body.dig(:caller, :requested_by, :canonical_name) ||
+                             body.dig(:caller, :requested_by, :id)
+              return {} unless present?(raw_identity)
+
+              raw_type = body[:caller_type] ||
+                         body.dig(:identity, :type) ||
+                         body.dig(:caller, :requested_by, :type) ||
+                         body.dig(:caller, :source)
+              provider_name = body.dig(:identity, :credential) ||
+                              body.dig(:caller, :requested_by, :credential) ||
+                              'local'
+              parse_identity_descriptor(raw_identity, raw_type, provider_name)
+            end
+
+            def parse_identity_descriptor(raw_identity, raw_type, provider_name)
+              text = raw_identity.to_s
+              kind = normalize_caller_type(raw_type)
+              canonical = text
+
+              if text.include?(':') && !text.include?('@')
+                prefix, remainder = text.split(':', 2)
+                prefix_kind = normalize_caller_type(prefix)
+                if prefix_kind && present?(remainder)
+                  kind ||= prefix_kind
+                  canonical = remainder
+                end
+              end
+
+              {
+                canonical_name:        canonical,
+                kind:                  kind || 'unknown',
+                provider_identity_key: text,
+                provider_name:         normalize_provider_name(provider_name)
+              }
+            end
+
+            def find_or_create_identity_provider(db, provider_name)
+              table = db[:portable_identity_providers]
+              existing = table.where(name: provider_name).first
+              return existing if existing
+
+              id = insert_row(db, :portable_identity_providers, {
+                                uuid:          deterministic_uuid("portable_identity_provider:#{provider_name}"),
+                                name:          provider_name,
+                                provider_type: provider_name == 'local' ? 'local' : 'external',
+                                facing:        'internal',
+                                source:        'ledger',
+                                created_at:    Time.now.utc,
+                                updated_at:    Time.now.utc
+                              }, operation: 'official_record_writer.identity_provider')
+              table[id: id]
+            rescue Sequel::UniqueConstraintViolation => e
+              handle_exception(e, level: :debug, handled: true, operation: 'official_record_writer.identity_provider_race')
+              table.where(name: provider_name).first
+            end
+
+            def find_or_create_identity_principal(db, descriptor)
+              table = db[:portable_identity_principals]
+              existing = table.where(canonical_name: descriptor[:canonical_name], kind: descriptor[:kind]).first
+              return existing if existing
+
+              id = insert_row(db, :portable_identity_principals, {
+                                uuid:           deterministic_uuid("portable_identity_principal:#{descriptor[:kind]}:#{descriptor[:canonical_name]}"),
+                                canonical_name: descriptor[:canonical_name],
+                                kind:           descriptor[:kind],
+                                display_name:   descriptor[:canonical_name],
+                                last_seen_at:   Time.now.utc,
+                                created_at:     Time.now.utc,
+                                updated_at:     Time.now.utc
+                              }, operation: 'official_record_writer.identity_principal')
+              table[id: id]
+            rescue Sequel::UniqueConstraintViolation => e
+              handle_exception(e, level: :debug, handled: true, operation: 'official_record_writer.identity_principal_race')
+              table.where(canonical_name: descriptor[:canonical_name], kind: descriptor[:kind]).first
+            end
+
+            def find_or_create_portable_identity(db, principal, provider, descriptor)
+              table = db[:portable_identities]
+              existing = table.where(
+                principal_id:          principal[:id],
+                provider_id:           provider[:id],
+                provider_identity_key: descriptor[:provider_identity_key]
+              ).first
+              return existing if existing
+
+              uuid_key = "portable_identity:#{principal[:id]}:#{provider[:id]}:#{descriptor[:provider_identity_key]}"
+              id = insert_row(db, :portable_identities, {
+                                uuid:                  deterministic_uuid(uuid_key),
+                                principal_id:          principal[:id],
+                                provider_id:           provider[:id],
+                                provider_identity_key: descriptor[:provider_identity_key],
+                                last_authenticated_at: Time.now.utc,
+                                account_type:          'primary',
+                                is_default:            true,
+                                created_at:            Time.now.utc,
+                                updated_at:            Time.now.utc
+                              }, operation: 'official_record_writer.portable_identity')
+              table[id: id]
+            rescue Sequel::UniqueConstraintViolation => e
+              handle_exception(e, level: :debug, handled: true, operation: 'official_record_writer.portable_identity_race')
+              table.where(principal_id: principal[:id], provider_id: provider[:id],
+                          provider_identity_key: descriptor[:provider_identity_key]).first
+            end
+
+            def identity_tables_available?(db)
+              db.table_exists?(:portable_identity_providers) &&
+                db.table_exists?(:portable_identity_principals) &&
+                db.table_exists?(:portable_identities)
+            end
+
+            def normalize_caller_type(value)
+              return nil unless present?(value)
+
+              normalized = value.to_s.downcase.gsub(/[^a-z0-9_:-]+/, '_').split(':', 2).first
+              return 'human' if normalized == 'user'
+
+              normalized
+            end
+
+            def normalize_provider_name(value)
+              raw = present?(value) ? value.to_s : 'local'
+              raw.downcase.gsub(/[^a-z0-9_.:-]+/, '-').gsub(/\A-+|-+\z/, '')
+            end
+
+            def integer_or_nil(value)
+              return nil if value.nil?
+              return value if value.is_a?(Integer)
+
+              int = value.to_s.to_i
+              int.positive? ? int : nil
             end
 
             def correlation_id(body)
@@ -326,6 +591,11 @@ module Legion
               return raw if raw.length <= 36
 
               hex = Digest::SHA256.hexdigest(raw)[0, 32]
+              "#{hex[0, 8]}-#{hex[8, 4]}-#{hex[12, 4]}-#{hex[16, 4]}-#{hex[20, 12]}"
+            end
+
+            def deterministic_uuid(value)
+              hex = Digest::SHA256.hexdigest(value.to_s)[0, 32]
               "#{hex[0, 8]}-#{hex[8, 4]}-#{hex[12, 4]}-#{hex[16, 4]}-#{hex[20, 12]}"
             end
 
