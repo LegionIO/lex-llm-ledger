@@ -42,8 +42,7 @@ module Legion
 
               db.transaction do
                 conversation = find_or_create_conversation(db, body)
-                user_message = find_or_create_user_message(db, conversation, body)
-                request = find_or_create_request(db, conversation, user_message, body)
+                request = find_or_create_request(db, conversation, nil, body)
                 response = find_or_create_response(db, request, nil, body)
                 metric = find_or_create_metric(db, request, response, body)
                 result = { result: :ok, request_id: request[:id], response_id: response[:id], metric_id: metric[:id] }
@@ -109,17 +108,14 @@ module Legion
             def find_or_create_request(db, conversation, latest_message, body)
               request_id = request_ref(body)
               existing = db[:llm_message_inference_requests].where(request_ref: request_id).first
-              if existing
-                enrich_request!(db, existing, body)
-                return existing
-              end
+              return enrich_request!(db, existing, body, latest_message) if existing
 
               operation = operation(body)
               caller_refs = caller_identity_refs(db, body)
               id = insert_with_savepoint(db, :llm_message_inference_requests, {
                                            uuid:                  stable_uuid(request_id),
                                            conversation_id:       conversation[:id],
-                                           latest_message_id:     latest_message[:id],
+                                           latest_message_id:     latest_message&.dig(:id),
                                            caller_principal_id:   caller_refs[:principal_id],
                                            caller_identity_id:    caller_refs[:identity_id],
                                            runtime_caller_type:   caller_type(body),
@@ -144,10 +140,7 @@ module Legion
             rescue Sequel::UniqueConstraintViolation => e
               log.debug("[ledger] request collision resolved request_ref=#{request_id} error=#{e.class}")
               existing = db[:llm_message_inference_requests].where(request_ref: request_id).first
-              if existing
-                enrich_request!(db, existing, body)
-                return existing
-              end
+              return enrich_request!(db, existing, body, latest_message) if existing
 
               raise
             end
@@ -252,7 +245,7 @@ module Legion
             end
 
             def find_or_create_metric(db, request, response, body)
-              metric_uuid = stable_uuid(reference(body, :message_id) || "metric:#{request_ref(body)}")
+              metric_uuid = stable_uuid(reference(body, :metric_id, :metric_ref) || "metric:#{request_ref(body)}")
               existing = db[:llm_message_inference_metrics].where(uuid: metric_uuid).first
               return existing if existing
 
@@ -287,7 +280,7 @@ module Legion
             end
 
             def insert_row(db, table, attributes, operation:)
-              Helpers::PersistenceLogging.insert_row(db, table, attributes, operation: operation)
+              Helpers::PersistenceLogging.insert_row(db, table, attributes, operation: operation, warn_on_unique: false)
             end
 
             def insert_with_savepoint(db, table, attributes, operation:)
@@ -309,8 +302,9 @@ module Legion
               db[:llm_messages].where(id: response_message[:id]).update(message_inference_response_id: response[:id])
             end
 
-            def enrich_request!(db, existing, body)
+            def enrich_request!(db, existing, body, latest_message = nil)
               updates = {}
+              update_if_missing(updates, existing, :latest_message_id, latest_message&.dig(:id))
               caller_refs = caller_identity_refs(db, body)
               updates[:caller_identity_id] = caller_refs[:identity_id] if existing[:caller_identity_id].nil? && caller_refs[:identity_id]
               updates[:caller_principal_id] = caller_refs[:principal_id] if existing[:caller_principal_id].nil? && caller_refs[:principal_id]
@@ -322,10 +316,11 @@ module Legion
               msg_count = Array(body.dig(:request, :messages) || body[:messages]).size
               updates[:context_message_count] = msg_count if existing[:context_message_count].to_i.zero? && msg_count.positive?
 
-              return if updates.empty?
+              return existing if updates.empty?
 
               db[:llm_message_inference_requests].where(id: existing[:id]).update(updates)
               log.info("[ledger] enriched request id=#{existing[:id]} fields=#{updates.keys.join(',')}")
+              existing.merge(updates)
             end
 
             def caller_identity(body)

@@ -68,6 +68,37 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Writers::OfficialPromptWriter do
     expect(Legion::Data.connection[:llm_message_inference_responses].count).to eq(1)
   end
 
+  it 'enriches metering-first records without duplicate messages or metrics' do
+    metering_payload = payload.except(:message_id, :response_message_id, :request, :response, :tokens).merge(
+      input_tokens:    10,
+      output_tokens:   3,
+      thinking_tokens: 2,
+      total_tokens:    15
+    )
+
+    Legion::Extensions::Llm::Ledger::Writers::OfficialMeteringWriter.write(metering_payload)
+    result = described_class.write(payload)
+
+    expect(result[:result]).to eq(:ok)
+    expect(Legion::Data.connection[:llm_conversations].count).to eq(1)
+    expect(Legion::Data.connection[:llm_messages].count).to eq(2)
+    expect(Legion::Data.connection[:llm_message_inference_requests].count).to eq(1)
+    expect(Legion::Data.connection[:llm_message_inference_responses].count).to eq(1)
+    expect(Legion::Data.connection[:llm_message_inference_metrics].count).to eq(1)
+
+    request = Legion::Data.connection[:llm_message_inference_requests].first
+    response = Legion::Data.connection[:llm_message_inference_responses].first
+    user_message = Legion::Data.connection[:llm_messages].where(role: 'user').first
+    assistant_message = Legion::Data.connection[:llm_messages].where(role: 'assistant').first
+    metric = Legion::Data.connection[:llm_message_inference_metrics].first
+
+    expect(request[:latest_message_id]).to eq(user_message[:id])
+    expect(response[:response_message_id]).to eq(assistant_message[:id])
+    expect(assistant_message[:parent_message_id]).to eq(user_message[:id])
+    expect(assistant_message[:message_inference_response_id]).to eq(response[:id])
+    expect(metric[:uuid]).to eq(record_writer.stable_uuid('metric:req-1'))
+  end
+
   it 'uses one generated request reference across a write when no request ids are present' do
     generated_payload = payload.except(:request_id, :correlation_id, :message_id, :response_message_id)
 

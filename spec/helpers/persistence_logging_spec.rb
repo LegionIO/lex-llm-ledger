@@ -49,6 +49,18 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Helpers::PersistenceLogging do
                                                 ))
   end
 
+  it 'can suppress duplicate insert warnings for caller-handled races' do
+    error = Sequel::UniqueConstraintViolation.new('duplicate')
+    allow(dataset).to receive(:insert).and_raise(error)
+
+    expect do
+      described_class.insert_row(db, :llm_metering_records, { uuid: 'metric_uuid' },
+                                 operation: 'write_metering_record', warn_on_unique: false)
+    end.to raise_error(Sequel::UniqueConstraintViolation)
+
+    expect(logger).not_to have_received(:warn)
+  end
+
   it 'logs unexpected insert failures at error, reports the exception, and re-raises' do
     error = RuntimeError.new('database down')
     allow(dataset).to receive(:insert).and_raise(error)

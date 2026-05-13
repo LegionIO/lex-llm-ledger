@@ -19,13 +19,15 @@ module Legion
 
             module_function
 
-            def insert_row(db, table, attributes, operation:)
+            def insert_row(db, table, attributes, operation:, warn_on_unique: true)
               row_id = db[table].insert(attributes)
               log.info(log_message('inserted', table, operation, row_id, attributes))
               row_id
             rescue Sequel::UniqueConstraintViolation => e
-              log.warn(log_message('insert_failed', table, operation, nil, attributes,
-                                   error_class: e.class, error: e.message))
+              if warn_on_unique
+                log.warn(log_message('insert_failed', table, operation, nil, attributes,
+                                     error_class: e.class, error: e.message))
+              end
               raise
             rescue StandardError => e
               log.error(log_message('insert_failed', table, operation, nil, attributes,
