@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1] - 2026-05-13
+
+### Fixed
+- Recover cleanly when concurrent ledger consumers create the same conversation, request, response, metric, or identity rows.
+- Keep duplicate insert recovery inside savepoints so PostgreSQL transactions remain usable after unique constraint races.
+- Remove temporary prompt runner debug output while preserving single-message subscription prefetch behavior.
+
 ## [0.3.0] - 2026-05-08
 
 ### Changed

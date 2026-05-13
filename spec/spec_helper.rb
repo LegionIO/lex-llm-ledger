@@ -35,6 +35,8 @@ module Legion
 
       class Subscription
         include Legion::Logging::Helper
+
+        def self.prefetch(_count); end
       end
 
       class Every

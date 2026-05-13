@@ -57,20 +57,26 @@ module Legion
               existing = db[:llm_conversations].where(uuid: uuid).first
               return existing if existing
 
-              id = insert_row(db, :llm_conversations, {
-                                uuid:                 uuid,
-                                title:                body[:title] || body[:conversation_title],
-                                classification_level: classification_level(body),
-                                contains_phi:         contains_phi?(body),
-                                contains_pii:         contains_pii?(body),
-                                retention_policy:     body[:retention_policy] || 'default',
-                                expires_at:           body[:expires_at],
-                                recorded_at:          recorded_at(body),
-                                inserted_at:          Time.now.utc,
-                                created_at:           Time.now.utc,
-                                updated_at:           Time.now.utc
-                              }, operation: 'official_record_writer.conversation')
+              id = insert_with_savepoint(db, :llm_conversations, {
+                                           uuid:                 uuid,
+                                           title:                body[:title] || body[:conversation_title],
+                                           classification_level: classification_level(body),
+                                           contains_phi:         contains_phi?(body),
+                                           contains_pii:         contains_pii?(body),
+                                           retention_policy:     body[:retention_policy] || 'default',
+                                           expires_at:           body[:expires_at],
+                                           recorded_at:          recorded_at(body),
+                                           inserted_at:          Time.now.utc,
+                                           created_at:           Time.now.utc,
+                                           updated_at:           Time.now.utc
+                                         }, operation: 'official_record_writer.conversation')
               db[:llm_conversations][id: id]
+            rescue Sequel::UniqueConstraintViolation => e
+              log.debug("[ledger] conversation collision resolved uuid=#{uuid} error=#{e.class}")
+              existing = db[:llm_conversations].where(uuid: uuid).first
+              return existing if existing
+
+              raise
             end
 
             def find_or_create_user_message(db, conversation, body)
@@ -80,20 +86,18 @@ module Legion
 
               seq = body[:message_seq] ? integer(body[:message_seq]) : next_message_seq(db, conversation)
               begin
-                id = db.transaction(savepoint: true) do
-                  insert_row(db, :llm_messages, {
-                               uuid:            uuid,
-                               conversation_id: conversation[:id],
-                               seq:             seq,
-                               role:            'user',
-                               content_type:    'text',
-                               content:         request_content(body),
-                               input_tokens:    tokens(body)[:input_tokens],
-                               output_tokens:   0,
-                               created_at:      recorded_at(body),
-                               inserted_at:     Time.now.utc
-                             }, operation: 'official_record_writer.user_message')
-                end
+                id = insert_with_savepoint(db, :llm_messages, {
+                                             uuid:            uuid,
+                                             conversation_id: conversation[:id],
+                                             seq:             seq,
+                                             role:            'user',
+                                             content_type:    'text',
+                                             content:         request_content(body),
+                                             input_tokens:    tokens(body)[:input_tokens],
+                                             output_tokens:   0,
+                                             created_at:      recorded_at(body),
+                                             inserted_at:     Time.now.utc
+                                           }, operation: 'official_record_writer.user_message')
                 db[:llm_messages][id: id]
               rescue Sequel::UniqueConstraintViolation => e
                 log.debug("[ledger] seq collision resolved uuid=#{uuid} conversation_id=#{conversation[:id]} error=#{e.class}")
@@ -112,31 +116,40 @@ module Legion
 
               operation = operation(body)
               caller_refs = caller_identity_refs(db, body)
-              id = insert_row(db, :llm_message_inference_requests, {
-                                uuid:                  stable_uuid(request_id),
-                                conversation_id:       conversation[:id],
-                                latest_message_id:     latest_message[:id],
-                                caller_principal_id:   caller_refs[:principal_id],
-                                caller_identity_id:    caller_refs[:identity_id],
-                                runtime_caller_type:   caller_type(body),
-                                request_ref:           request_id,
-                                correlation_ref:       correlation_id(body),
-                                correlation_id:        correlation_id(body),
-                                exchange_ref:          body[:exchange_id],
-                                request_type:          operation,
-                                operation:             operation,
-                                idempotency_key:       body[:idempotency_key] || request_id,
-                                status:                'responded',
-                                context_message_count: Array(body.dig(:request, :messages) || body[:messages]).size,
-                                request_capture_mode:  'full',
-                                request_json:          json_dump(request_payload(body)),
-                                classification_level:  classification_level(body),
-                                cost_center:           billing(body)[:cost_center],
-                                budget_key:            billing(body)[:budget_id] || billing(body)[:budget_key],
-                                requested_at:          recorded_at(body),
-                                inserted_at:           Time.now.utc
-                              }, operation: 'official_record_writer.inference_request')
+              id = insert_with_savepoint(db, :llm_message_inference_requests, {
+                                           uuid:                  stable_uuid(request_id),
+                                           conversation_id:       conversation[:id],
+                                           latest_message_id:     latest_message[:id],
+                                           caller_principal_id:   caller_refs[:principal_id],
+                                           caller_identity_id:    caller_refs[:identity_id],
+                                           runtime_caller_type:   caller_type(body),
+                                           request_ref:           request_id,
+                                           correlation_ref:       correlation_id(body),
+                                           correlation_id:        correlation_id(body),
+                                           exchange_ref:          body[:exchange_id],
+                                           request_type:          operation,
+                                           operation:             operation,
+                                           idempotency_key:       body[:idempotency_key] || request_id,
+                                           status:                'responded',
+                                           context_message_count: Array(body.dig(:request, :messages) || body[:messages]).size,
+                                           request_capture_mode:  'full',
+                                           request_json:          json_dump(request_payload(body)),
+                                           classification_level:  classification_level(body),
+                                           cost_center:           billing(body)[:cost_center],
+                                           budget_key:            billing(body)[:budget_id] || billing(body)[:budget_key],
+                                           requested_at:          recorded_at(body),
+                                           inserted_at:           Time.now.utc
+                                         }, operation: 'official_record_writer.inference_request')
               db[:llm_message_inference_requests][id: id]
+            rescue Sequel::UniqueConstraintViolation => e
+              log.debug("[ledger] request collision resolved request_ref=#{request_id} error=#{e.class}")
+              existing = db[:llm_message_inference_requests].where(request_ref: request_id).first
+              if existing
+                enrich_request!(db, existing, body)
+                return existing
+              end
+
+              raise
             end
 
             def find_or_create_response_message(db, conversation, request, body)
@@ -147,22 +160,20 @@ module Legion
               latest = db[:llm_messages][id: request[:latest_message_id]]
               seq = (latest&.dig(:seq) || 1) + 1
               begin
-                id = db.transaction(savepoint: true) do
-                  insert_row(db, :llm_messages, {
-                               uuid:                         uuid,
-                               conversation_id:              conversation[:id],
-                               parent_message_id:            latest&.dig(:id),
-                               message_inference_request_id: request[:id],
-                               seq:                          seq,
-                               role:                         'assistant',
-                               content_type:                 'text',
-                               content:                      response_content(body),
-                               input_tokens:                 0,
-                               output_tokens:                tokens(body)[:output_tokens],
-                               created_at:                   recorded_at(body),
-                               inserted_at:                  Time.now.utc
-                             }, operation: 'official_record_writer.response_message')
-                end
+                id = insert_with_savepoint(db, :llm_messages, {
+                                             uuid:                         uuid,
+                                             conversation_id:              conversation[:id],
+                                             parent_message_id:            latest&.dig(:id),
+                                             message_inference_request_id: request[:id],
+                                             seq:                          seq,
+                                             role:                         'assistant',
+                                             content_type:                 'text',
+                                             content:                      response_content(body),
+                                             input_tokens:                 0,
+                                             output_tokens:                tokens(body)[:output_tokens],
+                                             created_at:                   recorded_at(body),
+                                             inserted_at:                  Time.now.utc
+                                           }, operation: 'official_record_writer.response_message')
                 db[:llm_messages][id: id]
               rescue Sequel::UniqueConstraintViolation => e
                 log.debug("[ledger] seq collision resolved uuid=#{uuid} conversation_id=#{conversation[:id]} error=#{e.class}")
@@ -179,28 +190,37 @@ module Legion
                 return existing
               end
 
-              id = insert_row(db, :llm_message_inference_responses, {
-                                uuid:                         response_uuid,
-                                message_inference_request_id: request[:id],
-                                response_message_id:          response_message&.dig(:id),
-                                provider:                     provider(body),
-                                provider_instance:            provider_instance(body),
-                                model_key:                    model_id(body),
-                                tier:                         tier(body),
-                                runner_ref:                   body[:worker_id] || body[:runner_ref],
-                                provider_response_ref:        body[:provider_response_ref],
-                                status:                       body[:error] ? 'error' : 'success',
-                                finish_reason:                finish_reason(body),
-                                latency_ms:                   integer(body[:latency_ms]),
-                                wall_clock_ms:                integer(body[:wall_clock_ms]),
-                                response_capture_mode:        'full',
-                                response_json:                json_dump(visible_response(body)),
-                                response_thinking_json:       json_dump(thinking_response(body)),
-                                dispatch_path:                body[:dispatch_path] || body[:tier],
-                                responded_at:                 recorded_at(body),
-                                inserted_at:                  Time.now.utc
-                              }, operation: 'official_record_writer.inference_response')
+              id = insert_with_savepoint(db, :llm_message_inference_responses, {
+                                           uuid:                         response_uuid,
+                                           message_inference_request_id: request[:id],
+                                           response_message_id:          response_message&.dig(:id),
+                                           provider:                     provider(body),
+                                           provider_instance:            provider_instance(body),
+                                           model_key:                    model_id(body),
+                                           tier:                         tier(body),
+                                           runner_ref:                   body[:worker_id] || body[:runner_ref],
+                                           provider_response_ref:        body[:provider_response_ref],
+                                           status:                       body[:error] ? 'error' : 'success',
+                                           finish_reason:                finish_reason(body),
+                                           latency_ms:                   integer(body[:latency_ms]),
+                                           wall_clock_ms:                integer(body[:wall_clock_ms]),
+                                           response_capture_mode:        'full',
+                                           response_json:                json_dump(visible_response(body)),
+                                           response_thinking_json:       json_dump(thinking_response(body)),
+                                           dispatch_path:                body[:dispatch_path] || body[:tier],
+                                           responded_at:                 recorded_at(body),
+                                           inserted_at:                  Time.now.utc
+                                         }, operation: 'official_record_writer.inference_response')
               db[:llm_message_inference_responses][id: id]
+            rescue Sequel::UniqueConstraintViolation => e
+              log.debug("[ledger] response collision resolved uuid=#{response_uuid} error=#{e.class}")
+              existing = db[:llm_message_inference_responses].where(uuid: response_uuid).first
+              if existing
+                enrich_response!(db, existing, response_message, body)
+                return existing
+              end
+
+              raise
             end
 
             def enrich_response!(db, existing, response_message, body)
@@ -237,31 +257,43 @@ module Legion
               return existing if existing
 
               token_values = tokens(body)
-              id = insert_row(db, :llm_message_inference_metrics, {
-                                uuid:                          metric_uuid,
-                                message_inference_request_id:  request[:id],
-                                message_inference_response_id: response[:id],
-                                provider:                      provider(body),
-                                model_key:                     model_id(body),
-                                tier:                          tier(body),
-                                input_tokens:                  token_values[:input_tokens],
-                                output_tokens:                 token_values[:output_tokens],
-                                thinking_tokens:               token_values[:thinking_tokens],
-                                total_tokens:                  token_values[:total_tokens],
-                                latency_ms:                    integer(body[:latency_ms]),
-                                wall_clock_ms:                 integer(body[:wall_clock_ms]),
-                                cost_usd:                      cost_usd(body),
-                                currency:                      body[:currency] || 'USD',
-                                cost_center:                   billing(body)[:cost_center],
-                                budget_key:                    billing(body)[:budget_id] || billing(body)[:budget_key],
-                                recorded_at:                   recorded_at(body),
-                                inserted_at:                   Time.now.utc
-                              }, operation: 'official_record_writer.inference_metric')
+              id = insert_with_savepoint(db, :llm_message_inference_metrics, {
+                                           uuid:                          metric_uuid,
+                                           message_inference_request_id:  request[:id],
+                                           message_inference_response_id: response[:id],
+                                           provider:                      provider(body),
+                                           model_key:                     model_id(body),
+                                           tier:                          tier(body),
+                                           input_tokens:                  token_values[:input_tokens],
+                                           output_tokens:                 token_values[:output_tokens],
+                                           thinking_tokens:               token_values[:thinking_tokens],
+                                           total_tokens:                  token_values[:total_tokens],
+                                           latency_ms:                    integer(body[:latency_ms]),
+                                           wall_clock_ms:                 integer(body[:wall_clock_ms]),
+                                           cost_usd:                      cost_usd(body),
+                                           currency:                      body[:currency] || 'USD',
+                                           cost_center:                   billing(body)[:cost_center],
+                                           budget_key:                    billing(body)[:budget_id] || billing(body)[:budget_key],
+                                           recorded_at:                   recorded_at(body),
+                                           inserted_at:                   Time.now.utc
+                                         }, operation: 'official_record_writer.inference_metric')
               db[:llm_message_inference_metrics][id: id]
+            rescue Sequel::UniqueConstraintViolation => e
+              log.debug("[ledger] metric collision resolved uuid=#{metric_uuid} error=#{e.class}")
+              existing = db[:llm_message_inference_metrics].where(uuid: metric_uuid).first
+              return existing if existing
+
+              raise
             end
 
             def insert_row(db, table, attributes, operation:)
               Helpers::PersistenceLogging.insert_row(db, table, attributes, operation: operation)
+            end
+
+            def insert_with_savepoint(db, table, attributes, operation:)
+              db.transaction(savepoint: true) do
+                insert_row(db, table, attributes, operation: operation)
+              end
             end
 
             def request_ref(body)
@@ -396,19 +428,22 @@ module Legion
               existing = table.where(name: provider_name).first
               return existing if existing
 
-              id = insert_row(db, :identity_providers, {
-                                uuid:          deterministic_uuid("identity_provider:#{provider_name}"),
-                                name:          provider_name,
-                                provider_type: provider_name == 'local' ? 'local' : 'external',
-                                facing:        'internal',
-                                source:        'ledger',
-                                created_at:    Time.now.utc,
-                                updated_at:    Time.now.utc
-                              }, operation: 'official_record_writer.identity_provider')
+              id = insert_with_savepoint(db, :identity_providers, {
+                                           uuid:          deterministic_uuid("identity_provider:#{provider_name}"),
+                                           name:          provider_name,
+                                           provider_type: provider_name == 'local' ? 'local' : 'external',
+                                           facing:        'internal',
+                                           source:        'ledger',
+                                           created_at:    Time.now.utc,
+                                           updated_at:    Time.now.utc
+                                         }, operation: 'official_record_writer.identity_provider')
               table[id: id]
             rescue Sequel::UniqueConstraintViolation => e
               handle_exception(e, level: :debug, handled: true, operation: 'official_record_writer.identity_provider_race')
-              table.where(name: provider_name).first
+              existing = table.where(name: provider_name).first
+              return existing if existing
+
+              raise
             end
 
             def find_or_create_identity_principal(db, descriptor)
@@ -416,19 +451,22 @@ module Legion
               existing = table.where(canonical_name: descriptor[:canonical_name], kind: descriptor[:kind]).first
               return existing if existing
 
-              id = insert_row(db, :identity_principals, {
-                                uuid:           deterministic_uuid("identity_principal:#{descriptor[:kind]}:#{descriptor[:canonical_name]}"),
-                                canonical_name: descriptor[:canonical_name],
-                                kind:           descriptor[:kind],
-                                display_name:   descriptor[:canonical_name],
-                                last_seen_at:   Time.now.utc,
-                                created_at:     Time.now.utc,
-                                updated_at:     Time.now.utc
-                              }, operation: 'official_record_writer.identity_principal')
+              id = insert_with_savepoint(db, :identity_principals, {
+                                           uuid:           deterministic_uuid("identity_principal:#{descriptor[:kind]}:#{descriptor[:canonical_name]}"),
+                                           canonical_name: descriptor[:canonical_name],
+                                           kind:           descriptor[:kind],
+                                           display_name:   descriptor[:canonical_name],
+                                           last_seen_at:   Time.now.utc,
+                                           created_at:     Time.now.utc,
+                                           updated_at:     Time.now.utc
+                                         }, operation: 'official_record_writer.identity_principal')
               table[id: id]
             rescue Sequel::UniqueConstraintViolation => e
               handle_exception(e, level: :debug, handled: true, operation: 'official_record_writer.identity_principal_race')
-              table.where(canonical_name: descriptor[:canonical_name], kind: descriptor[:kind]).first
+              existing = table.where(canonical_name: descriptor[:canonical_name], kind: descriptor[:kind]).first
+              return existing if existing
+
+              raise
             end
 
             def find_or_create_identity(db, principal, provider, descriptor)
@@ -441,22 +479,25 @@ module Legion
               return existing if existing
 
               uuid_key = "identity:#{principal[:id]}:#{provider[:id]}:#{descriptor[:provider_identity_key]}"
-              id = insert_row(db, :identities, {
-                                uuid:                  deterministic_uuid(uuid_key),
-                                principal_id:          principal[:id],
-                                provider_id:           provider[:id],
-                                provider_identity_key: descriptor[:provider_identity_key],
-                                last_authenticated_at: Time.now.utc,
-                                account_type:          'primary',
-                                is_default:            true,
-                                created_at:            Time.now.utc,
-                                updated_at:            Time.now.utc
-                              }, operation: 'official_record_writer.identity')
+              id = insert_with_savepoint(db, :identities, {
+                                           uuid:                  deterministic_uuid(uuid_key),
+                                           principal_id:          principal[:id],
+                                           provider_id:           provider[:id],
+                                           provider_identity_key: descriptor[:provider_identity_key],
+                                           last_authenticated_at: Time.now.utc,
+                                           account_type:          'primary',
+                                           is_default:            true,
+                                           created_at:            Time.now.utc,
+                                           updated_at:            Time.now.utc
+                                         }, operation: 'official_record_writer.identity')
               table[id: id]
             rescue Sequel::UniqueConstraintViolation => e
               handle_exception(e, level: :debug, handled: true, operation: 'official_record_writer.identity_race')
-              table.where(principal_id: principal[:id], provider_id: provider[:id],
-                          provider_identity_key: descriptor[:provider_identity_key]).first
+              existing = table.where(principal_id: principal[:id], provider_id: provider[:id],
+                                     provider_identity_key: descriptor[:provider_identity_key]).first
+              return existing if existing
+
+              raise
             end
 
             def identity_tables_available?(db)

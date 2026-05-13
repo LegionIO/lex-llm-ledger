@@ -28,6 +28,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Writers::OfficialPromptWriter do
       recorded_at:         '2026-05-06T14:00:00Z'
     }
   end
+  let(:record_writer) { Legion::Extensions::Llm::Ledger::Writers::OfficialRecordWriter }
 
   it 'persists prompt audit events into the official LLM lifecycle schema' do
     result = described_class.write(payload)
@@ -81,6 +82,22 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Writers::OfficialPromptWriter do
     expect(assistant_message[:message_inference_request_id]).to eq(request[:id])
   end
 
+  %i[
+    llm_conversations
+    llm_message_inference_requests
+    llm_message_inference_responses
+    llm_message_inference_metrics
+  ].each do |table_name|
+    it "recovers when #{table_name} is inserted by a concurrent ledger consumer" do
+      simulate_insert_race(table_name)
+
+      result = described_class.write(payload)
+
+      expect(result[:result]).to eq(:ok)
+      expect(Legion::Data.connection[table_name].count).to eq(1)
+    end
+  end
+
   it 'resolves canonical caller identity strings into portable identity foreign keys' do
     described_class.write(
       payload.merge(
@@ -98,5 +115,18 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Writers::OfficialPromptWriter do
     expect(request[:caller_principal_id]).to eq(principal[:id])
     expect(request[:caller_identity_id]).to eq(identity[:id])
     expect(request[:runtime_caller_type]).to eq('human')
+  end
+
+  def simulate_insert_race(table_name)
+    raced = false
+    allow(record_writer).to receive(:insert_with_savepoint).and_wrap_original do |original, db, table, attributes, operation:|
+      if table == table_name && !raced
+        raced = true
+        db[table].insert(attributes)
+        raise Sequel::UniqueConstraintViolation, "duplicate #{table}"
+      end
+
+      original.call(db, table, attributes, operation: operation)
+    end
   end
 end
