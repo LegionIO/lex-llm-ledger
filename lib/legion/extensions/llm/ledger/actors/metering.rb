@@ -11,6 +11,8 @@ module Legion
           class Metering < Legion::Extensions::Actors::Subscription
             include Helpers::SubscriptionActor
 
+            prefetch 1
+
             def runner_class = Legion::Extensions::Llm::Ledger::Runners::Metering
 
             def runner_function

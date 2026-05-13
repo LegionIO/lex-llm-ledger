@@ -11,6 +11,8 @@ module Legion
           class Tools < Legion::Extensions::Actors::Subscription
             include Helpers::SubscriptionActor
 
+            prefetch 1
+
             def runner_class = Legion::Extensions::Llm::Ledger::Runners::Tools
 
             def runner_function
