@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2] - 2026-05-13
+
+### Fixed
+- Keep metering-only writes from creating placeholder conversation messages so later prompt audits can attach the real user and assistant messages without sequence collisions.
+- Use the request reference as the default inference metric idempotency key so metering and prompt audit events enrich the same metric row.
+- Suppress duplicate insert warnings for unique races handled by the official ledger writer while retaining debug-level collision messages.
+
 ## [0.3.1] - 2026-05-13
 
 ### Fixed

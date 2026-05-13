@@ -184,7 +184,7 @@ module Legion
             end
 
             def official_metric_uuid(payload)
-              ref = payload[:message_id] || "metric:#{Writers::OfficialRecordWriter.request_ref(payload)}"
+              ref = payload[:metric_id] || payload[:metric_ref] || "metric:#{Writers::OfficialRecordWriter.request_ref(payload)}"
               Writers::OfficialRecordWriter.stable_uuid(ref)
             end
 
