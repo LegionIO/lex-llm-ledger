@@ -91,6 +91,15 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::RegistryAvailability do
       expect(Legion::Data.connection[:llm_registry_availability_records].count).to eq(1)
     end
 
+    it 'stores nil identity_canonical_name for infrastructure registry events with no caller context' do
+      described_class.write_registry_availability_record(payload, metadata)
+
+      row = Legion::Data.connection[:llm_registry_availability_records].first
+      # Registry availability events carry no user identity — they are infrastructure
+      # heartbeats from worker nodes. identity_canonical_name is nil by design.
+      expect(row[:identity_canonical_name]).to be_nil
+    end
+
     it 'returns error without raising when database persistence fails' do
       allow(Legion::Data.connection).to receive(:[]).with(:llm_registry_availability_records).and_raise(Sequel::DatabaseError,
                                                                                                         'database down')

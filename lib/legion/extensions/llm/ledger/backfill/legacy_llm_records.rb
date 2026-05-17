@@ -13,9 +13,9 @@ module Legion
             extend Legion::Logging::Helper
 
             LEGACY_TABLES = %i[
-              llm_prompt_records
-              llm_metering_records
-              llm_tool_records
+              z_archive_llm_prompt_records
+              z_archive_llm_metering_records
+              z_archive_llm_tool_records
               llm_registry_availability_records
             ].freeze
 
@@ -43,11 +43,11 @@ module Legion
 
             def backfill_row(table, row)
               case table
-              when :llm_prompt_records
+              when :z_archive_llm_prompt_records
                 backfill_prompt(row)
-              when :llm_metering_records
+              when :z_archive_llm_metering_records
                 backfill_metering(row)
-              when :llm_tool_records
+              when :z_archive_llm_tool_records
                 backfill_tool(row)
               when :llm_registry_availability_records
                 backfill_registry(row)

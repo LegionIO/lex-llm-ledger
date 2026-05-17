@@ -39,6 +39,9 @@ module Legion
             end
 
             def build_registry_availability_record(body, props)
+              # Registry availability events are infrastructure heartbeats from worker nodes.
+              # They carry no user identity context. identity_principal_id, identity_id, and
+              # identity_canonical_name are intentionally omitted — the DB default (NULL) is correct.
               offering = body[:offering] || {}
               runtime = body[:runtime] || {}
               lane = body[:lane]

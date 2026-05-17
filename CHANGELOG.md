@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.4.0] - 2026-05-17
+
+### Changed
+- Rewrite `Runners::Tools` to write tool audit events to the official `llm_tool_calls` and
+  `llm_tool_call_attempts` tables instead of the legacy `llm_tool_records` table.
+- Each tool audit event produces one `llm_tool_calls` row (linked to the parent
+  `llm_message_inference_responses` row) and one `llm_tool_call_attempts` row containing
+  the execution outcome.
+- Argument and result payloads are stored as SHA-256 fingerprints in `arguments_ref` /
+  `result_ref` (the official schema columns are 255-char refs, not full JSON blobs).
+- Idempotency is enforced via UUID derived from `tool_call.id` (or request/message context);
+  a second write for the same tool call returns `{ result: :duplicate }`.
+- Tool call writes that cannot be linked to an existing inference response are logged at
+  `warn` and dropped gracefully (returns `{ result: :ok }`).
+- Populate `identity_canonical_name` on every insert in `OfficialRecordWriter`:
+  `llm_conversations`, `llm_messages` (user and assistant), `llm_message_inference_requests`,
+  `llm_message_inference_responses`, and `llm_message_inference_metrics`.
+- Populate `identity_principal_id` and `identity_id` on inserts into `llm_messages`,
+  `llm_message_inference_responses`, and `llm_message_inference_metrics`.
+- Backfill `identity_canonical_name` in `enrich_request!` and `enrich_response!` when the
+  enrichment opportunity arrives after a metering-first write.
+- `Runners::Tools` extracts identity via `CallerIdentity.normalize` and writes
+  `identity_canonical_name`, `identity_principal_id`, and `identity_id` to both
+  `llm_tool_calls` and `llm_tool_call_attempts`.
+- `Runners::RegistryAvailability` intentionally omits identity columns — registry events
+  are infrastructure-only heartbeats with no user caller context.
+
 ## [0.3.3] - 2026-05-17
 
 ### Fixed
