@@ -96,7 +96,29 @@ module Legion
             end
 
             def response_thinking(body)
-              body[:response_thinking] || body[:thinking] || body.dig(:response, :thinking) || {}
+              thinking = body[:response_thinking] || body[:thinking] || body.dig(:response, :thinking)
+              if thinking
+                thinking.is_a?(Hash) ? thinking : { content: thinking }
+              else
+                extract_thinking_from_content(body)
+              end
+            end
+
+            def extract_thinking_from_content(body)
+              content_str = body[:response_content] || body[:response] || body[:content]
+              return {} unless content_str.is_a?(String)
+
+              _clean, extracted = extract_inline_thinking(content_str)
+              extracted ? { content: extracted } : {}
+            end
+
+            def extract_inline_thinking(text)
+              if defined?(::Legion::Extensions::Llm::Responses::ThinkingExtractor)
+                extraction = ::Legion::Extensions::Llm::Responses::ThinkingExtractor.extract(text)
+                [extraction.content, extraction.thinking]
+              else
+                [text, nil]
+              end
             end
 
             def official_prompt_payload(body, ctx, props, headers, expires_at)

@@ -149,5 +149,25 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Prompts do
         described_class.write_prompt_record('encrypted_blob', metadata)
       end.to raise_error(Legion::Extensions::Llm::Ledger::Helpers::DecryptionFailed, /missing iv/)
     end
+
+    context 'when response has inline thinking tags but no response_thinking key' do
+      let(:inline_thinking_body) do
+        decrypted_body.merge(
+          response:          '<think>Reasoning about the question.</think>The final answer.',
+          response_thinking: nil
+        )
+      end
+
+      it 'extracts thinking from inline tags into response_thinking_json' do
+        described_class.write_prompt_record(inline_thinking_body, metadata)
+
+        response = Legion::Data.connection[:llm_message_inference_responses].first
+        thinking_json = JSON.parse(response[:response_thinking_json])
+        response_json = JSON.parse(response[:response_json])
+
+        expect(thinking_json['content']).to eq('Reasoning about the question.')
+        expect(response_json['content']).to eq('The final answer.')
+      end
+    end
   end
 end

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.3] - 2026-05-17
+
+### Fixed
+- Extract inline `<think>` / `<thinking>` tags from string responses into `response_thinking_json` at write time instead of leaving them in `response_json`.
+- Fall back to `ThinkingExtractor` when `response_thinking` is absent from the audit payload (covers Ollama, vLLM, and OpenAI-compatible gateways that pass thinking inline).
+- Guard `finish_reason` and `thinking_response` against `String#dig` TypeError when `body[:response]` is a plain string.
+
 ## [0.3.2] - 2026-05-13
 
 ### Fixed
