@@ -200,6 +200,18 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Writers::OfficialPromptWriter do
     expect(conversation[:identity_canonical_name]).to eq('dana@example.com')
   end
 
+  it 'stores runtime caller class and client from payload' do
+    described_class.write(
+      payload.merge(
+        caller: { source: 'api', path: '/api/llm/inference', class: 'Legion::LLM::API::Native::Inference', client: 'LegionIO-Interlink/1.1.6' }
+      )
+    )
+
+    request = Legion::Data.connection[:llm_message_inference_requests].first
+    expect(request[:runtime_caller_class]).to eq('Legion::LLM::API::Native::Inference')
+    expect(request[:runtime_caller_client]).to eq('LegionIO-Interlink/1.1.6')
+  end
+
   context 'when response contains inline thinking tags' do
     let(:thinking_payload) do
       payload.merge(

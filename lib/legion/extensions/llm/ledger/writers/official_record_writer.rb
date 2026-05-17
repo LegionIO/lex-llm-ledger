@@ -125,6 +125,8 @@ module Legion
                                            caller_identity_id:      caller_refs[:identity_id],
                                            identity_canonical_name: identity_canonical_name(body),
                                            runtime_caller_type:     caller_type(body),
+                                           runtime_caller_class:    runtime_caller_class(body),
+                                           runtime_caller_client:   runtime_caller_client(body),
                                            request_ref:             request_id,
                                            correlation_ref:         correlation_id(body),
                                            correlation_id:          correlation_id(body),
@@ -325,6 +327,8 @@ module Legion
               updates[:caller_identity_id] = caller_refs[:identity_id] if existing[:caller_identity_id].nil? && caller_refs[:identity_id]
               updates[:caller_principal_id] = caller_refs[:principal_id] if existing[:caller_principal_id].nil? && caller_refs[:principal_id]
               updates[:runtime_caller_type] = caller_type(body) if existing[:runtime_caller_type].nil? && caller_type(body)
+              update_if_missing(updates, existing, :runtime_caller_class, runtime_caller_class(body))
+              update_if_missing(updates, existing, :runtime_caller_client, runtime_caller_client(body))
               update_if_missing(updates, existing, :identity_canonical_name, identity_canonical_name(body))
 
               request_json = json_dump(request_payload(body))
@@ -356,6 +360,16 @@ module Legion
               return normalize_caller_type(raw_type) if present?(raw_type)
 
               parsed_identity_descriptor(body)[:kind]
+            end
+
+            def runtime_caller_class(body)
+              body.dig(:caller, :class) || body.dig(:caller, :caller_class) ||
+                body.dig(:caller, :source_class) || body[:runtime_caller_class]
+            end
+
+            def runtime_caller_client(body)
+              body.dig(:caller, :client) || body.dig(:caller, :user_agent) ||
+                body[:runtime_caller_client]
             end
 
             def caller_identity_refs(db, body)

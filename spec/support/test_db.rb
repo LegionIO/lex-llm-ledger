@@ -56,5 +56,20 @@ module TestDb
         add_column :identity_canonical_name, String, size: 255, null: true unless columns.include?(:identity_canonical_name)
       end
     end
+
+    ensure_runtime_caller_columns!(db)
+  end
+
+  # Add runtime_caller_class and runtime_caller_client to llm_message_inference_requests
+  # when legion-data migrations adding these columns are not yet on disk.
+  def ensure_runtime_caller_columns!(db)
+    table = :llm_message_inference_requests
+    return unless db.table_exists?(table)
+
+    columns = db[table].columns
+    db.alter_table(table) do
+      add_column :runtime_caller_class, String, size: 255, null: true unless columns.include?(:runtime_caller_class)
+      add_column :runtime_caller_client, String, size: 255, null: true unless columns.include?(:runtime_caller_client)
+    end
   end
 end
