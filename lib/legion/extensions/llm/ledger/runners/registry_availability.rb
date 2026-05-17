@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../helpers/caller_identity'
 require_relative '../helpers/json'
 require_relative '../helpers/persistence_logging'
 
@@ -13,10 +14,11 @@ module Legion
 
             def write_registry_availability_record(payload = nil, metadata = {}, **message)
               payload, metadata = normalize_runner_args(payload, metadata, message)
-              props = metadata[:properties] || {}
+              headers = Helpers::SubscriptionMessage.extract_headers(payload, metadata)
+              props   = metadata[:properties] || {}
 
               body = symbolize(payload)
-              record = build_registry_availability_record(body, props)
+              record = build_registry_availability_record(body, props, headers)
               Helpers::PersistenceLogging.insert_row(
                 ::Legion::Data.connection,
                 :llm_registry_availability_records,
@@ -38,42 +40,53 @@ module Legion
               Helpers::SubscriptionMessage.runner_args(payload, metadata, message)
             end
 
-            def build_registry_availability_record(body, props)
-              # Registry availability events are infrastructure heartbeats from worker nodes.
-              # They carry no user identity context. identity_principal_id, identity_id, and
-              # identity_canonical_name are intentionally omitted — the DB default (NULL) is correct.
+            def build_registry_availability_record(body, props, headers)
               offering = body[:offering] || {}
               runtime = body[:runtime] || {}
               lane = body[:lane]
 
               {
-                event_id:          body[:event_id],
-                message_id:        props[:message_id],
-                correlation_id:    props[:correlation_id],
-                routing_key:       props[:routing_key],
-                event_type:        body[:event_type].to_s,
-                occurred_at:       body[:occurred_at],
-                offering_id:       offering[:offering_id],
-                provider_family:   offering[:provider_family]&.to_s,
-                provider_instance: offering[:provider_instance]&.to_s,
-                instance_id:       offering[:instance_id]&.to_s,
-                model_family:      offering[:model_family]&.to_s,
-                model_id:          offering[:model],
-                canonical_model:   offering[:canonical_model_alias],
-                provider_model:    offering[:provider_model],
-                usage_type:        offering[:usage_type]&.to_s,
-                transport:         offering[:transport]&.to_s,
-                lane_key:          lane_key(lane),
-                worker_id:         runtime[:worker_id] || runtime[:worker],
-                node_id:           runtime[:node_id] || runtime[:host_id],
-                offering_json:     json_dump(offering),
-                runtime_json:      json_dump(runtime),
-                capacity_json:     json_dump(body[:capacity] || {}),
-                health_json:       json_dump(body[:health] || {}),
-                lane_json:         json_dump(lane || {}),
-                metadata_json:     json_dump(body[:metadata] || {}),
-                inserted_at:       Time.now.utc
+                event_id:                body[:event_id],
+                message_id:              props[:message_id],
+                correlation_id:          props[:correlation_id],
+                routing_key:             props[:routing_key],
+                event_type:              body[:event_type].to_s,
+                occurred_at:             body[:occurred_at],
+                offering_id:             offering[:offering_id],
+                provider_family:         offering[:provider_family]&.to_s,
+                provider_instance:       offering[:provider_instance]&.to_s,
+                instance_id:             offering[:instance_id]&.to_s,
+                model_family:            offering[:model_family]&.to_s,
+                model_id:                offering[:model],
+                canonical_model:         offering[:canonical_model_alias],
+                provider_model:          offering[:provider_model],
+                usage_type:              offering[:usage_type]&.to_s,
+                transport:               offering[:transport]&.to_s,
+                lane_key:                lane_key(lane),
+                worker_id:               runtime[:worker_id] || runtime[:worker],
+                node_id:                 runtime[:node_id] || runtime[:host_id],
+                identity_canonical_name: extract_canonical_name(body, headers),
+                offering_json:           json_dump(offering),
+                runtime_json:            json_dump(runtime),
+                capacity_json:           json_dump(body[:capacity] || {}),
+                health_json:             json_dump(body[:health] || {}),
+                lane_json:               json_dump(lane || {}),
+                metadata_json:           json_dump(body[:metadata] || {}),
+                inserted_at:             Time.now.utc
               }
+            end
+
+            # Extract identity_canonical_name from AMQP headers or body.
+            # No FK resolution — node/service identities may not be registered in
+            # identity tables, but the canonical name string is still valuable for
+            # tracking which identity is publishing which model availability.
+            def extract_canonical_name(body, headers)
+              raw = headers['x-legion-identity'] ||
+                    body.dig(:identity, :identity) ||
+                    body.dig(:identity, :canonical_name)
+              return nil unless raw && !raw.to_s.empty? # rubocop:disable Legion/Extension/RunnerReturnHash
+
+              raw.to_s
             end
 
             def lane_key(lane)

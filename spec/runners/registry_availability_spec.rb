@@ -91,13 +91,35 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::RegistryAvailability do
       expect(Legion::Data.connection[:llm_registry_availability_records].count).to eq(1)
     end
 
-    it 'stores nil identity_canonical_name for infrastructure registry events with no caller context' do
+    it 'stores nil identity_canonical_name when no identity is present in headers or body' do
       described_class.write_registry_availability_record(payload, metadata)
 
       row = Legion::Data.connection[:llm_registry_availability_records].first
-      # Registry availability events carry no user identity — they are infrastructure
-      # heartbeats from worker nodes. identity_canonical_name is nil by design.
       expect(row[:identity_canonical_name]).to be_nil
+    end
+
+    it 'writes identity_canonical_name from x-legion-identity header when present' do
+      metadata_with_identity = metadata.merge(
+        headers: {
+          'x-legion-identity'    => 'lex-llm-ollama',
+          'x-legion-caller-type' => 'service',
+          'x-legion-credential'  => 'local'
+        }
+      )
+      described_class.write_registry_availability_record(payload, metadata_with_identity)
+
+      row = Legion::Data.connection[:llm_registry_availability_records].first
+      expect(row[:identity_canonical_name]).to eq('lex-llm-ollama')
+    end
+
+    it 'writes identity_canonical_name from body identity block when header is absent' do
+      payload_with_identity = payload.merge(
+        identity: { identity: 'apollo-worker-01', type: 'service', credential: 'local' }
+      )
+      described_class.write_registry_availability_record(payload_with_identity, metadata)
+
+      row = Legion::Data.connection[:llm_registry_availability_records].first
+      expect(row[:identity_canonical_name]).to eq('apollo-worker-01')
     end
 
     it 'returns error without raising when database persistence fails' do
