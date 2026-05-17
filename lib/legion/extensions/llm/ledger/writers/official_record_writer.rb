@@ -3,6 +3,7 @@
 require 'digest'
 require 'securerandom'
 require 'legion/logging'
+require 'legion/extensions/llm/responses/thinking_extractor'
 require_relative '../helpers/json'
 require_relative '../helpers/persistence_logging'
 

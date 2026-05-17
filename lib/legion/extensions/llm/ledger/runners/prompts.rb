@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'legion/extensions/llm/responses/thinking_extractor'
 require_relative '../helpers/caller_identity'
 require_relative '../helpers/json'
 
@@ -96,7 +97,8 @@ module Legion
             end
 
             def response_thinking(body)
-              thinking = body[:response_thinking] || body[:thinking] || body.dig(:response, :thinking)
+              thinking = body[:response_thinking] || body[:thinking]
+              thinking ||= body.dig(:response, :thinking) if body[:response].is_a?(Hash)
               if thinking
                 thinking.is_a?(Hash) ? thinking : { content: thinking }
               else
