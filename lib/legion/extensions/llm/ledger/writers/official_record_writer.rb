@@ -3,6 +3,7 @@
 require 'digest'
 require 'securerandom'
 require 'legion/logging'
+require 'legion/extensions/llm/responses/thinking_extractor'
 require_relative '../helpers/json'
 require_relative '../helpers/persistence_logging'
 
@@ -580,18 +581,38 @@ module Legion
 
             def visible_response(body)
               response = body[:response] || body[:response_content] || body[:content] || {}
-              return { content: response } if response.is_a?(String)
+              if response.is_a?(String)
+                clean, _thinking = extract_inline_thinking(response)
+                return { content: clean }
+              end
               return { content: response[:content] } if response.is_a?(Hash) && response.key?(:content)
 
               response.is_a?(Hash) ? response.except(:thinking) : { content: response.to_s }
             end
 
             def thinking_response(body)
-              thinking = body[:response_thinking] || body[:thinking] || body.dig(:response, :thinking)
-              return {} if thinking.nil?
-              return { content: thinking } if thinking.is_a?(String)
+              thinking = body[:response_thinking] || body[:thinking]
+              thinking ||= body.dig(:response, :thinking) if body[:response].is_a?(Hash)
+              if thinking
+                return { content: thinking } if thinking.is_a?(String)
 
-              thinking
+                return thinking
+              end
+
+              content_str = body[:response_content] || body[:response] || body[:content]
+              return {} unless content_str.is_a?(String)
+
+              _clean, extracted = extract_inline_thinking(content_str)
+              extracted ? { content: extracted } : {}
+            end
+
+            def extract_inline_thinking(text)
+              if defined?(::Legion::Extensions::Llm::Responses::ThinkingExtractor)
+                extraction = ::Legion::Extensions::Llm::Responses::ThinkingExtractor.extract(text)
+                [extraction.content, extraction.thinking]
+              else
+                [text, nil]
+              end
             end
 
             def response_content(body)
@@ -599,7 +620,10 @@ module Legion
             end
 
             def finish_reason(body)
-              body[:finish_reason] || body.dig(:response, :finish_reason) || body.dig(:response, :stop, :reason)
+              return body[:finish_reason] if body[:finish_reason]
+              return nil unless body[:response].is_a?(Hash)
+
+              body.dig(:response, :finish_reason) || body.dig(:response, :stop, :reason)
             end
 
             def classification_level(body)

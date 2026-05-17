@@ -75,6 +75,7 @@ $LOADED_FEATURES << 'legion/transport/queue.rb'
 lib = File.expand_path('../lib', __dir__)
 $LOAD_PATH.unshift(lib) unless $LOAD_PATH.include?(lib)
 
+require 'legion/extensions/llm/responses/thinking_extractor'
 require 'legion/extensions/llm/ledger/version'
 require 'legion/extensions/llm/ledger/writers/official_prompt_writer'
 require 'legion/extensions/llm/ledger/writers/official_metering_writer'

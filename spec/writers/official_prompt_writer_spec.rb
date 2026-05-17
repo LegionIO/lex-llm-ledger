@@ -148,6 +148,65 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Writers::OfficialPromptWriter do
     expect(request[:runtime_caller_type]).to eq('human')
   end
 
+  context 'when response contains inline thinking tags' do
+    let(:thinking_payload) do
+      payload.merge(
+        response:          '<think>Let me reason about this carefully.</think>The answer is 42.',
+        response_thinking: nil
+      )
+    end
+
+    it 'extracts thinking into response_thinking_json and strips from response_json' do
+      described_class.write(thinking_payload)
+
+      response = Legion::Data.connection[:llm_message_inference_responses].first
+      response_json = JSON.parse(response[:response_json])
+      thinking_json = JSON.parse(response[:response_thinking_json])
+
+      expect(response_json['content']).to eq('The answer is 42.')
+      expect(thinking_json['content']).to eq('Let me reason about this carefully.')
+    end
+
+    it 'extracts <thinking> variant tags' do
+      described_class.write(
+        payload.merge(
+          response:          '<thinking>Internal reasoning here.</thinking>Final output.',
+          response_thinking: nil
+        )
+      )
+
+      response = Legion::Data.connection[:llm_message_inference_responses].first
+      response_json = JSON.parse(response[:response_json])
+      thinking_json = JSON.parse(response[:response_thinking_json])
+
+      expect(response_json['content']).to eq('Final output.')
+      expect(thinking_json['content']).to eq('Internal reasoning here.')
+    end
+
+    it 'prefers explicit response_thinking over inline extraction' do
+      described_class.write(
+        payload.merge(
+          response:          '<think>inline</think>visible',
+          response_thinking: 'explicit thinking'
+        )
+      )
+
+      response = Legion::Data.connection[:llm_message_inference_responses].first
+      thinking_json = JSON.parse(response[:response_thinking_json])
+
+      expect(thinking_json['content']).to eq('explicit thinking')
+    end
+
+    it 'stores empty thinking when no tags and no explicit thinking present' do
+      described_class.write(payload.merge(response: 'plain response text', response_thinking: nil))
+
+      response = Legion::Data.connection[:llm_message_inference_responses].first
+      thinking_json = JSON.parse(response[:response_thinking_json])
+
+      expect(thinking_json).to eq({})
+    end
+  end
+
   def simulate_insert_race(table_name)
     raced = false
     allow(record_writer).to receive(:insert_with_savepoint).and_wrap_original do |original, db, table, attributes, operation:|
