@@ -146,6 +146,70 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Writers::OfficialPromptWriter do
     expect(request[:caller_principal_id]).to eq(principal[:id])
     expect(request[:caller_identity_id]).to eq(identity[:id])
     expect(request[:runtime_caller_type]).to eq('human')
+    expect(request[:identity_canonical_name]).to eq('matt@example.com')
+  end
+
+  it 'writes identity_principal_id, identity_id, and identity_canonical_name on responses and metrics' do
+    described_class.write(
+      payload.merge(
+        identity: { identity: 'alex@example.com', type: 'human', credential: 'entra_delegated' }
+      )
+    )
+
+    principal = Legion::Data.connection[:identity_principals].first
+    identity  = Legion::Data.connection[:identities].first
+    response  = Legion::Data.connection[:llm_message_inference_responses].first
+    metric    = Legion::Data.connection[:llm_message_inference_metrics].first
+
+    expect(response[:identity_principal_id]).to eq(principal[:id])
+    expect(response[:identity_id]).to eq(identity[:id])
+    expect(response[:identity_canonical_name]).to eq('alex@example.com')
+    expect(metric[:identity_principal_id]).to eq(principal[:id])
+    expect(metric[:identity_id]).to eq(identity[:id])
+    expect(metric[:identity_canonical_name]).to eq('alex@example.com')
+  end
+
+  it 'writes identity columns on user and assistant messages' do
+    described_class.write(
+      payload.merge(
+        identity: { identity: 'sam@example.com', type: 'human', credential: 'entra_delegated' }
+      )
+    )
+
+    principal     = Legion::Data.connection[:identity_principals].first
+    identity      = Legion::Data.connection[:identities].first
+    user_message  = Legion::Data.connection[:llm_messages].where(role: 'user').first
+    assistant_msg = Legion::Data.connection[:llm_messages].where(role: 'assistant').first
+
+    expect(user_message[:identity_principal_id]).to eq(principal[:id])
+    expect(user_message[:identity_id]).to eq(identity[:id])
+    expect(user_message[:identity_canonical_name]).to eq('sam@example.com')
+    expect(assistant_msg[:identity_principal_id]).to eq(principal[:id])
+    expect(assistant_msg[:identity_id]).to eq(identity[:id])
+    expect(assistant_msg[:identity_canonical_name]).to eq('sam@example.com')
+  end
+
+  it 'writes identity_canonical_name on conversations' do
+    described_class.write(
+      payload.merge(
+        identity: { identity: 'dana@example.com', type: 'human', credential: 'entra_delegated' }
+      )
+    )
+
+    conversation = Legion::Data.connection[:llm_conversations].first
+    expect(conversation[:identity_canonical_name]).to eq('dana@example.com')
+  end
+
+  it 'stores runtime caller class and client from payload' do
+    described_class.write(
+      payload.merge(
+        caller: { source: 'api', path: '/api/llm/inference', class: 'Legion::LLM::API::Native::Inference', client: 'LegionIO-Interlink/1.1.6' }
+      )
+    )
+
+    request = Legion::Data.connection[:llm_message_inference_requests].first
+    expect(request[:runtime_caller_class]).to eq('Legion::LLM::API::Native::Inference')
+    expect(request[:runtime_caller_client]).to eq('LegionIO-Interlink/1.1.6')
   end
 
   context 'when response contains inline thinking tags' do

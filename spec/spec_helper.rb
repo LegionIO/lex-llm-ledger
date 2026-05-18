@@ -137,9 +137,9 @@ RSpec.configure do |config|
       Legion::Data.connection[table].delete if Legion::Data.connection.table_exists?(table)
     end
 
-    Legion::Data.connection[:llm_metering_records].delete
-    Legion::Data.connection[:llm_prompt_records].delete
-    Legion::Data.connection[:llm_tool_records].delete
+    Legion::Data.connection[:z_archive_llm_metering_records].delete
+    Legion::Data.connection[:z_archive_llm_prompt_records].delete
+    Legion::Data.connection[:z_archive_llm_tool_records].delete
     Legion::Data.connection[:llm_registry_availability_records].delete
   end
 end

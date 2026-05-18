@@ -9,9 +9,9 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Backfill::LegacyLlmRecords do
 
     result = described_class.run
 
-    expect(result[:llm_prompt_records]).to eq(1)
-    expect(result[:llm_metering_records]).to eq(1)
-    expect(result[:llm_tool_records]).to eq(1)
+    expect(result[:z_archive_llm_prompt_records]).to eq(1)
+    expect(result[:z_archive_llm_metering_records]).to eq(1)
+    expect(result[:z_archive_llm_tool_records]).to eq(1)
     expect(result[:llm_registry_availability_records]).to eq(1)
     expect(Legion::Data.connection[:llm_message_inference_requests].count).to eq(2)
     expect(Legion::Data.connection[:llm_message_inference_metrics].count).to eq(2)
@@ -20,9 +20,9 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Backfill::LegacyLlmRecords do
 
     rerun_result = described_class.run
     expect(rerun_result).to eq(
-      llm_prompt_records:                0,
-      llm_metering_records:              0,
-      llm_tool_records:                  0,
+      z_archive_llm_prompt_records:      0,
+      z_archive_llm_metering_records:    0,
+      z_archive_llm_tool_records:        0,
       llm_registry_availability_records: 0
     )
   end
@@ -32,7 +32,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Backfill::LegacyLlmRecords do
 
     result = described_class.run
 
-    expect(result[:llm_tool_records]).to eq(0)
+    expect(result[:z_archive_llm_tool_records]).to eq(0)
     expect(Legion::Data.connection[:llm_message_inference_requests].count).to eq(0)
     expect(Legion::Data.connection[:llm_message_inference_metrics].count).to eq(0)
     expect(Legion::Data.connection[:llm_tool_calls].count).to eq(0)
@@ -45,7 +45,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Backfill::LegacyLlmRecords do
   end
 
   def insert_legacy_prompt
-    Legion::Data.connection[:llm_prompt_records].insert(
+    Legion::Data.connection[:z_archive_llm_prompt_records].insert(
       message_id:             'audit-1',
       correlation_id:         'corr-1',
       conversation_id:        'conv-legacy',
@@ -67,7 +67,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Backfill::LegacyLlmRecords do
   end
 
   def insert_legacy_metering
-    Legion::Data.connection[:llm_metering_records].insert(
+    Legion::Data.connection[:z_archive_llm_metering_records].insert(
       message_id:      'meter-1',
       correlation_id:  'corr-2',
       conversation_id: 'conv-legacy',
@@ -90,7 +90,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Backfill::LegacyLlmRecords do
   end
 
   def insert_legacy_tool(request_id: 'req-prompt')
-    Legion::Data.connection[:llm_tool_records].insert(
+    Legion::Data.connection[:z_archive_llm_tool_records].insert(
       message_id:      'tool-1',
       correlation_id:  'corr-3',
       conversation_id: 'conv-legacy',

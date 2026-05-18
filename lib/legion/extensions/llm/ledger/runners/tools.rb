@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'digest'
+require 'securerandom'
 require_relative '../helpers/caller_identity'
 require_relative '../helpers/json'
 require_relative '../helpers/persistence_logging'
@@ -21,19 +23,25 @@ module Legion
               ctx  = body[:message_context] || {}
               tool = body[:tool_call]       || {}
 
-              expires_at = Helpers::Retention.resolve(
+              Helpers::Retention.resolve(
                 retention:    headers['x-legion-retention'],
                 contains_phi: headers['x-legion-contains-phi'] == 'true'
               )
 
-              record = build_tool_record(body, ctx, tool, props, headers, expires_at)
-              Helpers::PersistenceLogging.insert_row(
-                ::Legion::Data.connection,
-                :llm_tool_records,
-                record,
-                operation: 'write_tool_record'
-              )
-              { result: :ok }
+              db = ::Legion::Data.connection
+              write_result = [:ok]
+              db.transaction do
+                response                     = find_or_resolve_response(db, body, ctx, props, headers)
+                identity_attrs               = extract_identity_attrs(body, headers, db)
+                tool_call_row, new_tool_call = find_or_create_tool_call(db, response, body, ctx, tool, headers, identity_attrs)
+                if tool_call_row && !new_tool_call
+                  write_result[0] = :duplicate
+                elsif new_tool_call
+                  find_or_create_tool_call_attempt(db, tool_call_row, tool, body, props, headers, identity_attrs)
+                end
+              end
+
+              { result: write_result[0] }
             rescue Sequel::UniqueConstraintViolation => e
               log.warn("write_tool_record duplicate insert ignored: #{e.message}")
               { result: :duplicate }
@@ -54,46 +62,202 @@ module Legion
               Helpers::SubscriptionMessage.runner_args(payload, metadata, message)
             end
 
-            def build_tool_record(body, ctx, tool, props, headers, expires_at) # rubocop:disable Metrics/AbcSize,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
-              src      = tool[:source] || {}
-              cls      = body[:classification] || {}
-              ts       = body[:timestamps] || {}
-              tracing    = body[:tracing] || {}
-              caller_raw = body[:caller] || {}
-              identity   = body[:identity] || {}
+            # Resolve the llm_message_inference_responses row this tool call belongs to.
+            # Returns nil if we cannot link at all.
+            def find_or_resolve_response(db, body, ctx, props, headers)
+              request_ref = ctx[:request_id] || body[:request_id] ||
+                            props[:correlation_id] || headers['x-legion-llm-request-id']
+              return nil unless request_ref # rubocop:disable Legion/Extension/RunnerReturnHash
+
+              request = db[:llm_message_inference_requests].where(request_ref: request_ref).first
+              return nil unless request # rubocop:disable Legion/Extension/RunnerReturnHash
+
+              db[:llm_message_inference_responses]
+                .where(message_inference_request_id: request[:id]).first
+            end
+
+            def find_or_create_tool_call(db, response, body, ctx, tool, headers, identity_attrs)
+              tool_uuid = derive_tool_call_uuid(body, ctx, tool, headers)
+              existing  = db[:llm_tool_calls].where(uuid: tool_uuid).first
+              return [existing, false] if existing # rubocop:disable Legion/Extension/RunnerReturnHash
+
+              response_id = resolve_response_id(db, response, body, ctx, headers, tool_uuid)
+              return [nil, false] unless response_id # rubocop:disable Legion/Extension/RunnerReturnHash
+
+              next_index = db[:llm_tool_calls]
+                           .where(message_inference_response_id: response_id)
+                           .max(:tool_call_index).to_i + 1
+
+              src    = tool[:source] || {}
+              status = tool[:status] || headers['x-legion-tool-status'] || 'success'
+              ts     = body[:timestamps] || {}
+
+              id = insert_with_savepoint(db, :llm_tool_calls, {
+                                           uuid:                          tool_uuid,
+                                           message_inference_response_id: response_id,
+                                           tool_call_index:               next_index,
+                                           provider_tool_call_ref:        tool[:id],
+                                           tool_name:                     tool[:name] || headers['x-legion-tool-name'],
+                                           tool_source_type:              src[:type] || headers['x-legion-tool-source-type'],
+                                           tool_source_server:            src[:server] || headers['x-legion-tool-source-server'],
+                                           status:                        status,
+                                           requested_at:                  ts[:tool_start] || tool[:started_at],
+                                           completed_at:                  ts[:tool_end] || tool[:finished_at],
+                                           **identity_attrs,
+                                           inserted_at:                   Time.now.utc
+                                         }, operation: 'write_tool_record.tool_call')
+              [db[:llm_tool_calls][id: id], true]
+            rescue Sequel::UniqueConstraintViolation => e
+              log.debug("[ledger] tool_call collision resolved uuid=#{tool_uuid} error=#{e.class}")
+              row = db[:llm_tool_calls].where(uuid: tool_uuid).first
+              raise(e) unless row
+
+              [row, false]
+            end
+
+            # Extract or fall back to find a response_id for linking the tool call.
+            def resolve_response_id(db, response, body, ctx, headers, tool_uuid)
+              return response[:id] if response # rubocop:disable Legion/Extension/RunnerReturnHash
+
+              fallback = fallback_response_for_conversation(db, body, ctx, headers)
+              return fallback[:id] if fallback # rubocop:disable Legion/Extension/RunnerReturnHash
+
+              log.warn("[ledger] write_tool_record: no response row found for tool call uuid=#{tool_uuid}, skipping")
+              nil
+            end
+
+            def fallback_response_for_conversation(db, body, ctx, headers)
+              conv_id = ctx[:conversation_id] || body[:conversation_id] ||
+                        headers['x-legion-llm-conversation-id']
+              return nil unless conv_id # rubocop:disable Legion/Extension/RunnerReturnHash
+
+              conv = db[:llm_conversations].where(uuid: stable_uuid(conv_id)).first ||
+                     db[:llm_conversations].where(uuid: conv_id).first
+              return nil unless conv # rubocop:disable Legion/Extension/RunnerReturnHash
+
+              db[:llm_message_inference_responses]
+                .join(:llm_message_inference_requests,
+                      id: :message_inference_request_id)
+                .where(Sequel[:llm_message_inference_requests][:conversation_id] => conv[:id])
+                .order(Sequel.desc(Sequel[:llm_message_inference_responses][:id]))
+                .select_all(:llm_message_inference_responses)
+                .first
+            end
+
+            def find_or_create_tool_call_attempt(db, tool_call_row, tool, body, props, headers, identity_attrs) # rubocop:disable Metrics/CyclomaticComplexity
+              return nil unless tool_call_row # rubocop:disable Legion/Extension/RunnerReturnHash
+
+              tool_call_id = tool_call_row[:id]
+              attempt_no   = db[:llm_tool_call_attempts]
+                             .where(tool_call_id: tool_call_id).max(:attempt_no).to_i + 1
+              attempt_uuid = derive_attempt_uuid(tool_call_row[:uuid], attempt_no)
+
+              existing = db[:llm_tool_call_attempts].where(uuid: attempt_uuid).first
+              return existing if existing # rubocop:disable Legion/Extension/RunnerReturnHash
+
+              status     = tool[:status] || headers['x-legion-tool-status'] || 'success'
+              error_info = tool[:error] || body[:error]
+              error_hash = error_info.is_a?(Hash) ? error_info : {}
+              ts         = body[:timestamps] || {}
+              runner_ref = body[:worker_id] || body[:runner_ref] || props[:app_id]
+
+              id = insert_with_savepoint(db, :llm_tool_call_attempts, {
+                                           uuid:           attempt_uuid,
+                                           tool_call_id:   tool_call_id,
+                                           attempt_no:     attempt_no,
+                                           runner_ref:     runner_ref,
+                                           status:         status,
+                                           error_category: error_hash[:category] || error_hash[:type],
+                                           error_code:     error_hash[:code],
+                                           error_message:  error_info.is_a?(String) ? error_info : error_hash[:message],
+                                           duration_ms:    tool[:duration_ms].to_i,
+                                           arguments_ref:  sha256_ref(tool[:arguments]),
+                                           result_ref:     sha256_ref(tool[:result] || body[:result]),
+                                           started_at:     ts[:tool_start] || tool[:started_at],
+                                           ended_at:       ts[:tool_end] || tool[:finished_at],
+                                           **identity_attrs,
+                                           inserted_at:    Time.now.utc
+                                         }, operation: 'write_tool_record.attempt')
+              db[:llm_tool_call_attempts][id: id]
+            rescue Sequel::UniqueConstraintViolation => e
+              log.debug("[ledger] tool_call_attempt collision resolved uuid=#{attempt_uuid} error=#{e.class}")
+              db[:llm_tool_call_attempts].where(uuid: attempt_uuid).first || raise(e)
+            end
+
+            def extract_identity_attrs(body, headers, db)
               caller_identity = Helpers::CallerIdentity.normalize(
-                caller_raw: caller_raw, identity: identity, headers: headers
+                caller_raw: body[:caller],
+                identity:   body[:identity],
+                headers:    headers
               )
-              agent = body[:agent] || {}
+              # raw_identity may carry a "type:value" prefix that OfficialRecordWriter
+              # knows how to parse; keep it intact for FK resolution.
+              raw_identity   = caller_identity[:identity]
+              canonical_name = raw_identity
+              # Strip "type:" prefix added by CallerIdentity for generic identities
+              if canonical_name&.include?(':') && !canonical_name&.include?('@')
+                _prefix, remainder = canonical_name.split(':', 2)
+                canonical_name = remainder if remainder && !remainder.empty?
+              end
+
+              refs = resolve_tool_identity(db, body, raw_identity)
 
               {
-                message_id:           props[:message_id] || body[:message_id],
-                correlation_id:       props[:correlation_id] || body[:correlation_id] || tracing[:correlation_id],
-                conversation_id:      ctx[:conversation_id] || body[:conversation_id] || headers['x-legion-llm-conversation-id'],
-                message_id_ctx:       ctx[:message_id],
-                parent_message_id:    ctx[:parent_message_id],
-                message_seq:          ctx[:message_seq],
-                request_id:           ctx[:request_id] || body[:request_id] || headers['x-legion-llm-request-id'],
-                exchange_id:          ctx[:exchange_id] || body[:exchange_id],
-                tool_call_id:         tool[:id],
-                tool_name:            tool[:name] || headers['x-legion-tool-name'],
-                tool_source_type:     src[:type] || headers['x-legion-tool-source-type'],
-                tool_source_server:   src[:server] || headers['x-legion-tool-source-server'],
-                tool_status:          tool[:status] || headers['x-legion-tool-status'],
-                tool_duration_ms:     tool[:duration_ms].to_i,
-                arguments_json:       Helpers::Json.dump(tool[:arguments] || {}),
-                result_json:          Helpers::Json.dump(tool[:result] || body[:result]),
-                error_json:           Helpers::Json.dump(tool[:error] || body[:error]),
-                caller_identity:      caller_identity[:identity],
-                agent_id:             agent[:id],
-                classification_level: cls[:level] || headers['x-legion-classification'],
-                contains_phi:         Helpers::Queries.phi_flag?(cls, headers),
-                retention_policy:     headers['x-legion-retention'] || 'default',
-                expires_at:           expires_at,
-                tool_start_at:        ts[:tool_start] || tool[:started_at],
-                tool_end_at:          ts[:tool_end] || tool[:finished_at],
-                inserted_at:          Time.now.utc
-              }
+                identity_canonical_name: canonical_name,
+                identity_principal_id:   refs[:principal_id],
+                identity_id:             refs[:identity_id]
+              }.compact
+            end
+
+            def resolve_tool_identity(db, body, raw_identity)
+              return {} unless raw_identity
+              return {} unless Writers::OfficialRecordWriter.identity_tables_available?(db)
+
+              # Merge the header-resolved identity string into the body so that
+              # OfficialRecordWriter.resolve_identity can find it via
+              # parsed_identity_descriptor even when identity came solely from
+              # AMQP headers and is absent from the payload body.
+              body_with_identity = raw_identity ? body.merge(caller_identity: raw_identity) : body
+              Writers::OfficialRecordWriter.resolve_identity(db, body_with_identity)
+            rescue StandardError => e
+              handle_exception(e, level: :warn, handled: true, operation: 'write_tool_record.identity_resolution')
+              {}
+            end
+
+            def derive_tool_call_uuid(body, ctx, tool, headers)
+              ref = tool[:id] ||
+                    ctx[:request_id] ||
+                    body[:request_id] ||
+                    headers['x-legion-llm-request-id'] ||
+                    ctx[:message_id] ||
+                    (body[:properties] || {})[:message_id]
+              stable_uuid("tool_call:#{ref || SecureRandom.uuid}")
+            end
+
+            def derive_attempt_uuid(tool_call_uuid, attempt_no)
+              stable_uuid("attempt:#{tool_call_uuid}:#{attempt_no}")
+            end
+
+            def sha256_ref(value)
+              return nil if value.nil? # rubocop:disable Legion/Extension/RunnerReturnHash
+
+              raw = value.is_a?(String) ? value : Helpers::Json.dump(value)
+              Digest::SHA256.hexdigest(raw)[0, 64]
+            end
+
+            def stable_uuid(value)
+              raw = value.to_s
+              return raw if raw.length <= 36 # rubocop:disable Legion/Extension/RunnerReturnHash
+
+              hex = Digest::SHA256.hexdigest(raw)[0, 32]
+              "#{hex[0, 8]}-#{hex[8, 4]}-#{hex[12, 4]}-#{hex[16, 4]}-#{hex[20, 12]}"
+            end
+
+            def insert_with_savepoint(db, table, attributes, operation:)
+              db.transaction(savepoint: true) do
+                Helpers::PersistenceLogging.insert_row(db, table, attributes,
+                                                       operation: operation, warn_on_unique: false)
+              end
             end
 
             include Legion::Extensions::Helpers::Lex if Legion::Extensions.const_defined?(:Helpers, false) &&

@@ -58,17 +58,18 @@ module Legion
               return existing if existing
 
               id = insert_with_savepoint(db, :llm_conversations, {
-                                           uuid:                 uuid,
-                                           title:                body[:title] || body[:conversation_title],
-                                           classification_level: classification_level(body),
-                                           contains_phi:         contains_phi?(body),
-                                           contains_pii:         contains_pii?(body),
-                                           retention_policy:     body[:retention_policy] || 'default',
-                                           expires_at:           body[:expires_at],
-                                           recorded_at:          recorded_at(body),
-                                           inserted_at:          Time.now.utc,
-                                           created_at:           Time.now.utc,
-                                           updated_at:           Time.now.utc
+                                           uuid:                    uuid,
+                                           title:                   body[:title] || body[:conversation_title],
+                                           classification_level:    classification_level(body),
+                                           contains_phi:            contains_phi?(body),
+                                           contains_pii:            contains_pii?(body),
+                                           retention_policy:        body[:retention_policy] || 'default',
+                                           expires_at:              body[:expires_at],
+                                           identity_canonical_name: identity_canonical_name(body),
+                                           recorded_at:             recorded_at(body),
+                                           inserted_at:             Time.now.utc,
+                                           created_at:              Time.now.utc,
+                                           updated_at:              Time.now.utc
                                          }, operation: 'official_record_writer.conversation')
               db[:llm_conversations][id: id]
             rescue Sequel::UniqueConstraintViolation => e
@@ -87,16 +88,19 @@ module Legion
               seq = body[:message_seq] ? integer(body[:message_seq]) : next_message_seq(db, conversation)
               begin
                 id = insert_with_savepoint(db, :llm_messages, {
-                                             uuid:            uuid,
-                                             conversation_id: conversation[:id],
-                                             seq:             seq,
-                                             role:            'user',
-                                             content_type:    'text',
-                                             content:         request_content(body),
-                                             input_tokens:    tokens(body)[:input_tokens],
-                                             output_tokens:   0,
-                                             created_at:      recorded_at(body),
-                                             inserted_at:     Time.now.utc
+                                             uuid:                    uuid,
+                                             conversation_id:         conversation[:id],
+                                             seq:                     seq,
+                                             role:                    'user',
+                                             content_type:            'text',
+                                             content:                 request_content(body),
+                                             input_tokens:            tokens(body)[:input_tokens],
+                                             output_tokens:           0,
+                                             identity_principal_id:   caller_identity_refs(db, body)[:principal_id],
+                                             identity_id:             caller_identity_refs(db, body)[:identity_id],
+                                             identity_canonical_name: identity_canonical_name(body),
+                                             created_at:              recorded_at(body),
+                                             inserted_at:             Time.now.utc
                                            }, operation: 'official_record_writer.user_message')
                 db[:llm_messages][id: id]
               rescue Sequel::UniqueConstraintViolation => e
@@ -114,28 +118,31 @@ module Legion
               operation = operation(body)
               caller_refs = caller_identity_refs(db, body)
               id = insert_with_savepoint(db, :llm_message_inference_requests, {
-                                           uuid:                  stable_uuid(request_id),
-                                           conversation_id:       conversation[:id],
-                                           latest_message_id:     latest_message&.dig(:id),
-                                           caller_principal_id:   caller_refs[:principal_id],
-                                           caller_identity_id:    caller_refs[:identity_id],
-                                           runtime_caller_type:   caller_type(body),
-                                           request_ref:           request_id,
-                                           correlation_ref:       correlation_id(body),
-                                           correlation_id:        correlation_id(body),
-                                           exchange_ref:          body[:exchange_id],
-                                           request_type:          operation,
-                                           operation:             operation,
-                                           idempotency_key:       body[:idempotency_key] || request_id,
-                                           status:                'responded',
-                                           context_message_count: Array(body.dig(:request, :messages) || body[:messages]).size,
-                                           request_capture_mode:  'full',
-                                           request_json:          json_dump(request_payload(body)),
-                                           classification_level:  classification_level(body),
-                                           cost_center:           billing(body)[:cost_center],
-                                           budget_key:            billing(body)[:budget_id] || billing(body)[:budget_key],
-                                           requested_at:          recorded_at(body),
-                                           inserted_at:           Time.now.utc
+                                           uuid:                    stable_uuid(request_id),
+                                           conversation_id:         conversation[:id],
+                                           latest_message_id:       latest_message&.dig(:id),
+                                           caller_principal_id:     caller_refs[:principal_id],
+                                           caller_identity_id:      caller_refs[:identity_id],
+                                           identity_canonical_name: identity_canonical_name(body),
+                                           runtime_caller_type:     caller_type(body),
+                                           runtime_caller_class:    runtime_caller_class(body),
+                                           runtime_caller_client:   runtime_caller_client(body),
+                                           request_ref:             request_id,
+                                           correlation_ref:         correlation_id(body),
+                                           correlation_id:          correlation_id(body),
+                                           exchange_ref:            body[:exchange_id],
+                                           request_type:            operation,
+                                           operation:               operation,
+                                           idempotency_key:         body[:idempotency_key] || request_id,
+                                           status:                  'responded',
+                                           context_message_count:   Array(body.dig(:request, :messages) || body[:messages]).size,
+                                           request_capture_mode:    'full',
+                                           request_json:            json_dump(request_payload(body)),
+                                           classification_level:    classification_level(body),
+                                           cost_center:             billing(body)[:cost_center],
+                                           budget_key:              billing(body)[:budget_id] || billing(body)[:budget_key],
+                                           requested_at:            recorded_at(body),
+                                           inserted_at:             Time.now.utc
                                          }, operation: 'official_record_writer.inference_request')
               db[:llm_message_inference_requests][id: id]
             rescue Sequel::UniqueConstraintViolation => e
@@ -165,6 +172,9 @@ module Legion
                                              content:                      response_content(body),
                                              input_tokens:                 0,
                                              output_tokens:                tokens(body)[:output_tokens],
+                                             identity_principal_id:        caller_identity_refs(db, body)[:principal_id],
+                                             identity_id:                  caller_identity_refs(db, body)[:identity_id],
+                                             identity_canonical_name:      identity_canonical_name(body),
                                              created_at:                   recorded_at(body),
                                              inserted_at:                  Time.now.utc
                                            }, operation: 'official_record_writer.response_message')
@@ -202,6 +212,9 @@ module Legion
                                            response_json:                json_dump(visible_response(body)),
                                            response_thinking_json:       json_dump(thinking_response(body)),
                                            dispatch_path:                body[:dispatch_path] || body[:tier],
+                                           identity_principal_id:        caller_identity_refs(db, body)[:principal_id],
+                                           identity_id:                  caller_identity_refs(db, body)[:identity_id],
+                                           identity_canonical_name:      identity_canonical_name(body),
                                            responded_at:                 recorded_at(body),
                                            inserted_at:                  Time.now.utc
                                          }, operation: 'official_record_writer.inference_response')
@@ -224,6 +237,7 @@ module Legion
               update_if_missing(updates, existing, :provider_instance, provider_instance(body))
               update_if_missing(updates, existing, :finish_reason, finish_reason(body))
               update_if_missing(updates, existing, :dispatch_path, body[:dispatch_path] || body[:tier])
+              update_if_missing(updates, existing, :identity_canonical_name, identity_canonical_name(body))
 
               response_json = json_dump(visible_response(body))
               update_if_placeholder(updates, existing, :response_json, response_json)
@@ -268,6 +282,9 @@ module Legion
                                            currency:                      body[:currency] || 'USD',
                                            cost_center:                   billing(body)[:cost_center],
                                            budget_key:                    billing(body)[:budget_id] || billing(body)[:budget_key],
+                                           identity_principal_id:         caller_identity_refs(db, body)[:principal_id],
+                                           identity_id:                   caller_identity_refs(db, body)[:identity_id],
+                                           identity_canonical_name:       identity_canonical_name(body),
                                            recorded_at:                   recorded_at(body),
                                            inserted_at:                   Time.now.utc
                                          }, operation: 'official_record_writer.inference_metric')
@@ -310,6 +327,9 @@ module Legion
               updates[:caller_identity_id] = caller_refs[:identity_id] if existing[:caller_identity_id].nil? && caller_refs[:identity_id]
               updates[:caller_principal_id] = caller_refs[:principal_id] if existing[:caller_principal_id].nil? && caller_refs[:principal_id]
               updates[:runtime_caller_type] = caller_type(body) if existing[:runtime_caller_type].nil? && caller_type(body)
+              update_if_missing(updates, existing, :runtime_caller_class, runtime_caller_class(body))
+              update_if_missing(updates, existing, :runtime_caller_client, runtime_caller_client(body))
+              update_if_missing(updates, existing, :identity_canonical_name, identity_canonical_name(body))
 
               request_json = json_dump(request_payload(body))
               updates[:request_json] = request_json if existing[:request_json].to_s == '{}' && request_json != '{}'
@@ -340,6 +360,16 @@ module Legion
               return normalize_caller_type(raw_type) if present?(raw_type)
 
               parsed_identity_descriptor(body)[:kind]
+            end
+
+            def runtime_caller_class(body)
+              body.dig(:caller, :class) || body.dig(:caller, :caller_class) ||
+                body.dig(:caller, :source_class) || body[:runtime_caller_class]
+            end
+
+            def runtime_caller_client(body)
+              body.dig(:caller, :client) || body.dig(:caller, :user_agent) ||
+                body[:runtime_caller_client]
             end
 
             def caller_identity_refs(db, body)
@@ -689,6 +719,10 @@ module Legion
               else
                 value
               end
+            end
+
+            def identity_canonical_name(body)
+              parsed_identity_descriptor(body)[:canonical_name]
             end
 
             def present?(value)
