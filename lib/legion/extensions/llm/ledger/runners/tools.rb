@@ -190,14 +190,17 @@ module Legion
                 identity:   body[:identity],
                 headers:    headers
               )
-              canonical_name = caller_identity[:identity]
+              # raw_identity may carry a "type:value" prefix that OfficialRecordWriter
+              # knows how to parse; keep it intact for FK resolution.
+              raw_identity   = caller_identity[:identity]
+              canonical_name = raw_identity
               # Strip "type:" prefix added by CallerIdentity for generic identities
               if canonical_name&.include?(':') && !canonical_name&.include?('@')
                 _prefix, remainder = canonical_name.split(':', 2)
                 canonical_name = remainder if remainder && !remainder.empty?
               end
 
-              refs = resolve_tool_identity(db, body, canonical_name)
+              refs = resolve_tool_identity(db, body, raw_identity)
 
               {
                 identity_canonical_name: canonical_name,
@@ -206,11 +209,16 @@ module Legion
               }.compact
             end
 
-            def resolve_tool_identity(db, body, canonical_name)
-              return {} unless canonical_name
+            def resolve_tool_identity(db, body, raw_identity)
+              return {} unless raw_identity
               return {} unless Writers::OfficialRecordWriter.identity_tables_available?(db)
 
-              Writers::OfficialRecordWriter.resolve_identity(db, body)
+              # Merge the header-resolved identity string into the body so that
+              # OfficialRecordWriter.resolve_identity can find it via
+              # parsed_identity_descriptor even when identity came solely from
+              # AMQP headers and is absent from the payload body.
+              body_with_identity = raw_identity ? body.merge(caller_identity: raw_identity) : body
+              Writers::OfficialRecordWriter.resolve_identity(db, body_with_identity)
             rescue StandardError => e
               handle_exception(e, level: :warn, handled: true, operation: 'write_tool_record.identity_resolution')
               {}

@@ -24,8 +24,9 @@
 - `Runners::Tools` extracts identity via `CallerIdentity.normalize` and writes
   `identity_canonical_name`, `identity_principal_id`, and `identity_id` to both
   `llm_tool_calls` and `llm_tool_call_attempts`.
-- `Runners::RegistryAvailability` intentionally omits identity columns — registry events
-  are infrastructure-only heartbeats with no user caller context.
+- `Runners::RegistryAvailability` writes `identity_canonical_name` from AMQP headers or
+  body identity fields when present; `identity_principal_id` and `identity_id` FK columns
+  are not resolved because node/service identities may not be registered in identity tables.
 
 ## [0.3.3] - 2026-05-17
 

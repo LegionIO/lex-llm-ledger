@@ -28,7 +28,7 @@ Gem::Specification.new do |spec|
   end
   spec.require_paths = ['lib']
 
-  spec.add_dependency 'legion-data',      '>= 1.8.0'
+  spec.add_dependency 'legion-data',      '>= 1.8.7'
   spec.add_dependency 'legion-json',      '>= 1.2'
   spec.add_dependency 'legion-logging',   '>= 1.3'
   spec.add_dependency 'legion-settings',  '>= 1.3'
