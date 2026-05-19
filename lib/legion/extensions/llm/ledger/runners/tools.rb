@@ -10,6 +10,8 @@ module Legion
   module Extensions
     module Llm
       module Ledger
+        class ResponseNotReady < StandardError; end
+
         module Runners
           module Tools
             extend self
@@ -51,6 +53,13 @@ module Legion
             rescue Helpers::DecryptionFailed => e
               handle_exception(e, level: :error, handled: true, operation: 'write_tool_record.decrypt')
               raise
+            rescue ResponseNotReady => e
+              raise if defined?(response_retried) && response_retried
+
+              response_retried = true # rubocop:disable Lint/UselessAssignment
+              log.warn("[ledger] write_tool_record: parent response not yet written, retrying in 1s (#{e.message})")
+              sleep 1
+              retry
             rescue StandardError => e
               handle_exception(e, level: :error, handled: true, operation: 'write_tool_record')
               { result: :error, error: e.message }
@@ -122,8 +131,7 @@ module Legion
               fallback = fallback_response_for_conversation(db, body, ctx, headers)
               return fallback[:id] if fallback # rubocop:disable Legion/Extension/RunnerReturnHash
 
-              log.warn("[ledger] write_tool_record: no response row found for tool call uuid=#{tool_uuid}, skipping")
-              nil
+              raise ResponseNotReady, "no response row found for tool call uuid=#{tool_uuid}"
             end
 
             def fallback_response_for_conversation(db, body, ctx, headers)

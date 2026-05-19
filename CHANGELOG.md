@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1] - 2026-05-18
+
+### Fixed
+- Tool write retries once after 1s when parent response row is not yet committed (race between async metering publish and tool audit AMQP delivery)
+- Raises `ResponseNotReady` instead of silently returning nil when response row is missing
+
+
 ## [0.4.0] - 2026-05-17
 
 ### Changed
