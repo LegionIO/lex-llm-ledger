@@ -11,6 +11,8 @@ module Legion
           class RegistryAvailability < Legion::Extensions::Actors::Subscription
             include Helpers::SubscriptionActor
 
+            prefetch 4
+
             def runner_class = Legion::Extensions::Llm::Ledger::Runners::RegistryAvailability
 
             def runner_function

@@ -19,6 +19,10 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Actor::RegistryAvailability do
     expect(described_class.superclass).to eq(Legion::Extensions::Actors::Subscription)
   end
 
+  it 'prefetches 4 messages' do
+    expect(described_class.prefetch).to eq(4)
+  end
+
   it 'uses the RegistryAvailability queue' do
     expect(actor.queue).to eq(Legion::Extensions::Llm::Ledger::Transport::Queues::RegistryAvailability)
   end

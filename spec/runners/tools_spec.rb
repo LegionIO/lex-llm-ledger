@@ -51,24 +51,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Tools do
 
   # Seed a conversation + request + response so the tool runner can link.
   def seed_inference_response(request_id: 'req_abc', conversation_id: 'conv_123')
-    conv_uuid = Legion::Extensions::Llm::Ledger::Writers::OfficialRecordWriter.stable_uuid(conversation_id)
-    conv_id = db[:llm_conversations].insert(
-      uuid:             conv_uuid,
-      retention_policy: 'default',
-      inserted_at:      Time.now.utc,
-      created_at:       Time.now.utc,
-      updated_at:       Time.now.utc
-    )
-    req_id = db[:llm_message_inference_requests].insert(
-      uuid:            Legion::Extensions::Llm::Ledger::Writers::OfficialRecordWriter.stable_uuid(request_id),
-      conversation_id: conv_id,
-      request_ref:     request_id,
-      status:          'responded',
-      operation:       'chat',
-      request_type:    'chat',
-      requested_at:    Time.now.utc,
-      inserted_at:     Time.now.utc
-    )
+    req_id = seed_inference_request(request_id: request_id, conversation_id: conversation_id)
     db[:llm_message_inference_responses].insert(
       uuid:                         Legion::Extensions::Llm::Ledger::Writers::OfficialRecordWriter.stable_uuid("response:#{request_id}"),
       message_inference_request_id: req_id,
@@ -77,6 +60,27 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Tools do
       status:                       'success',
       responded_at:                 Time.now.utc,
       inserted_at:                  Time.now.utc
+    )
+  end
+
+  def seed_inference_request(request_id: 'req_abc', conversation_id: 'conv_123')
+    conv_uuid = Legion::Extensions::Llm::Ledger::Writers::OfficialRecordWriter.stable_uuid(conversation_id)
+    conv_id = db[:llm_conversations].insert(
+      uuid:             conv_uuid,
+      retention_policy: 'default',
+      inserted_at:      Time.now.utc,
+      created_at:       Time.now.utc,
+      updated_at:       Time.now.utc
+    )
+    db[:llm_message_inference_requests].insert(
+      uuid:            Legion::Extensions::Llm::Ledger::Writers::OfficialRecordWriter.stable_uuid(request_id),
+      conversation_id: conv_id,
+      request_ref:     request_id,
+      status:          'responded',
+      operation:       'chat',
+      request_type:    'chat',
+      requested_at:    Time.now.utc,
+      inserted_at:     Time.now.utc
     )
   end
 
@@ -200,9 +204,21 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Tools do
     end
 
     context 'when no inference response exists for the request' do
-      it 'returns ok but writes no tool_call row (cannot link)' do
-        result = described_class.write_tool_record(decrypted_body, metadata)
-        expect(result).to eq({ result: :ok })
+      it 'raises UnrecoverableMessageError so the subscription rejects without requeue when parent rows are missing' do
+        expect do
+          described_class.write_tool_record(decrypted_body, metadata)
+        end.to raise_error(Legion::Extensions::Actors::UnrecoverableMessageError, /no response row found/)
+
+        expect(db[:llm_tool_calls].count).to eq(0)
+      end
+
+      it 'raises UnrecoverableMessageError when request exists before response commit' do
+        seed_inference_request
+
+        expect do
+          described_class.write_tool_record(decrypted_body, metadata)
+        end.to raise_error(Legion::Extensions::Actors::UnrecoverableMessageError, /no response row found/)
+
         expect(db[:llm_tool_calls].count).to eq(0)
       end
     end

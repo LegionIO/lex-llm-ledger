@@ -54,12 +54,8 @@ module Legion
               handle_exception(e, level: :error, handled: true, operation: 'write_tool_record.decrypt')
               raise
             rescue ResponseNotReady => e
-              raise if defined?(response_retried) && response_retried
-
-              response_retried = true # rubocop:disable Lint/UselessAssignment
-              log.warn("[ledger] write_tool_record: parent response not yet written, retrying in 1s (#{e.message})")
-              sleep 1
-              retry
+              log.warn("[ledger] write_tool_record: parent response not yet written, dead-lettering message (#{e.message})")
+              raise unrecoverable_message_error(e)
             rescue StandardError => e
               handle_exception(e, level: :error, handled: true, operation: 'write_tool_record')
               { result: :error, error: e.message }
@@ -69,6 +65,14 @@ module Legion
 
             def normalize_runner_args(payload, metadata, message)
               Helpers::SubscriptionMessage.runner_args(payload, metadata, message)
+            end
+
+            def unrecoverable_message_error(error)
+              if defined?(Legion::Extensions::Actors::UnrecoverableMessageError)
+                Legion::Extensions::Actors::UnrecoverableMessageError.new(error.message)
+              else
+                error
+              end
             end
 
             # Resolve the llm_message_inference_responses row this tool call belongs to.
