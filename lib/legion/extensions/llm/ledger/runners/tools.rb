@@ -10,6 +10,8 @@ module Legion
   module Extensions
     module Llm
       module Ledger
+        class ResponseNotReady < StandardError; end
+
         module Runners
           module Tools
             extend self
@@ -51,6 +53,9 @@ module Legion
             rescue Helpers::DecryptionFailed => e
               handle_exception(e, level: :error, handled: true, operation: 'write_tool_record.decrypt')
               raise
+            rescue ResponseNotReady => e
+              log.warn("[ledger] write_tool_record: parent response not yet written, dead-lettering message (#{e.message})")
+              raise unrecoverable_message_error(e)
             rescue StandardError => e
               handle_exception(e, level: :error, handled: true, operation: 'write_tool_record')
               { result: :error, error: e.message }
@@ -60,6 +65,14 @@ module Legion
 
             def normalize_runner_args(payload, metadata, message)
               Helpers::SubscriptionMessage.runner_args(payload, metadata, message)
+            end
+
+            def unrecoverable_message_error(error)
+              if defined?(Legion::Extensions::Actors::UnrecoverableMessageError)
+                Legion::Extensions::Actors::UnrecoverableMessageError.new(error.message)
+              else
+                error
+              end
             end
 
             # Resolve the llm_message_inference_responses row this tool call belongs to.
@@ -122,8 +135,7 @@ module Legion
               fallback = fallback_response_for_conversation(db, body, ctx, headers)
               return fallback[:id] if fallback # rubocop:disable Legion/Extension/RunnerReturnHash
 
-              log.warn("[ledger] write_tool_record: no response row found for tool call uuid=#{tool_uuid}, skipping")
-              nil
+              raise ResponseNotReady, "no response row found for tool call uuid=#{tool_uuid}"
             end
 
             def fallback_response_for_conversation(db, body, ctx, headers)

@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.2] - 2026-05-22
+
+### Fixed
+- Dead-letter tool audit messages with missing parent response rows via `UnrecoverableMessageError` so the subscription rejects the RabbitMQ delivery with `requeue: false` instead of acknowledging, republishing, or blocking inside a runner-local sleep/retry loop.
+- Set the `llm.registry.availability` subscription actor prefetch to 4 so registry availability events can drain with modest concurrency.
+
+## [0.4.1] - 2026-05-18
+
+### Fixed
+- Tool write retries once after 1s when parent response row is not yet committed (race between async metering publish and tool audit AMQP delivery)
+- Raises `ResponseNotReady` instead of silently returning nil when response row is missing
+
+
 ## [0.4.0] - 2026-05-17
 
 ### Changed
