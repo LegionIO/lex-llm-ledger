@@ -10,8 +10,6 @@ module Legion
   module Extensions
     module Llm
       module Ledger
-        class ResponseNotReady < StandardError; end
-
         module Runners
           module Tools
             extend self
@@ -31,11 +29,13 @@ module Legion
               )
 
               db = ::Legion::Data.connection
+              response = find_or_resolve_response_with_retry(db, body, ctx, props, headers)
               write_result = [:ok]
               db.transaction do
-                response                     = find_or_resolve_response(db, body, ctx, props, headers)
                 identity_attrs               = extract_identity_attrs(body, headers, db)
-                tool_call_row, new_tool_call = find_or_create_tool_call(db, response, body, ctx, tool, headers, identity_attrs)
+                conversation_id              = resolve_conversation_id(db, body, ctx, headers)
+                tool_call_row, new_tool_call = find_or_create_tool_call(db, response, body, ctx, tool, headers,
+                                                                        identity_attrs, conversation_id)
                 if tool_call_row && !new_tool_call
                   write_result[0] = :duplicate
                 elsif new_tool_call
@@ -53,9 +53,6 @@ module Legion
             rescue Helpers::DecryptionFailed => e
               handle_exception(e, level: :error, handled: true, operation: 'write_tool_record.decrypt')
               raise
-            rescue ResponseNotReady => e
-              log.warn("[ledger] write_tool_record: parent response not yet written, dead-lettering message (#{e.message})")
-              raise unrecoverable_message_error(e)
             rescue StandardError => e
               handle_exception(e, level: :error, handled: true, operation: 'write_tool_record')
               { result: :error, error: e.message }
@@ -67,16 +64,26 @@ module Legion
               Helpers::SubscriptionMessage.runner_args(payload, metadata, message)
             end
 
-            def unrecoverable_message_error(error)
-              if defined?(Legion::Extensions::Actors::UnrecoverableMessageError)
-                Legion::Extensions::Actors::UnrecoverableMessageError.new(error.message)
-              else
-                error
+            def find_or_resolve_response_with_retry(db, body, ctx, props, headers)
+              response = find_or_resolve_response(db, body, ctx, props, headers)
+              return response if response # rubocop:disable Legion/Extension/RunnerReturnHash
+
+              retry_attempts = tool_write_setting(:response_retry_attempts, 3)
+              retry_delay    = tool_write_setting(:response_retry_delay, 1)
+
+              retry_attempts.times do |attempt|
+                sleep retry_delay
+                response = find_or_resolve_response(db, body, ctx, props, headers)
+                if response
+                  log.debug("[ledger] write_tool_record: response found on retry #{attempt + 1}")
+                  return response # rubocop:disable Legion/Extension/RunnerReturnHash
+                end
               end
+
+              log.info('[ledger] write_tool_record: response not available after retries, proceeding with null response_id')
+              nil
             end
 
-            # Resolve the llm_message_inference_responses row this tool call belongs to.
-            # Returns nil if we cannot link at all.
             def find_or_resolve_response(db, body, ctx, props, headers)
               request_ref = ctx[:request_id] || body[:request_id] ||
                             props[:correlation_id] || headers['x-legion-llm-request-id']
@@ -89,17 +96,30 @@ module Legion
                 .where(message_inference_request_id: request[:id]).first
             end
 
-            def find_or_create_tool_call(db, response, body, ctx, tool, headers, identity_attrs)
+            def resolve_conversation_id(db, body, ctx, headers)
+              conv_ref = ctx[:conversation_id] || body[:conversation_id] ||
+                         headers['x-legion-llm-conversation-id']
+              return nil unless conv_ref # rubocop:disable Legion/Extension/RunnerReturnHash
+
+              conv = db[:llm_conversations].where(uuid: stable_uuid(conv_ref)).first ||
+                     db[:llm_conversations].where(uuid: conv_ref).first
+              conv&.[](:id)
+            end
+
+            def find_or_create_tool_call(db, response, body, ctx, tool, headers, identity_attrs, conversation_id)
               tool_uuid = derive_tool_call_uuid(body, ctx, tool, headers)
               existing  = db[:llm_tool_calls].where(uuid: tool_uuid).first
               return [existing, false] if existing # rubocop:disable Legion/Extension/RunnerReturnHash
 
-              response_id = resolve_response_id(db, response, body, ctx, headers, tool_uuid)
-              return [nil, false] unless response_id # rubocop:disable Legion/Extension/RunnerReturnHash
+              response_id = response&.[](:id)
 
-              next_index = db[:llm_tool_calls]
-                           .where(message_inference_response_id: response_id)
-                           .max(:tool_call_index).to_i + 1
+              next_index = if response_id
+                             db[:llm_tool_calls]
+                               .where(message_inference_response_id: response_id)
+                               .max(:tool_call_index).to_i + 1
+                           else
+                             0
+                           end
 
               src    = tool[:source] || {}
               status = tool[:status] || headers['x-legion-tool-status'] || 'success'
@@ -108,6 +128,7 @@ module Legion
               id = insert_with_savepoint(db, :llm_tool_calls, {
                                            uuid:                          tool_uuid,
                                            message_inference_response_id: response_id,
+                                           conversation_id:               conversation_id,
                                            tool_call_index:               next_index,
                                            provider_tool_call_ref:        tool[:id],
                                            tool_name:                     tool[:name] || headers['x-legion-tool-name'],
@@ -126,34 +147,6 @@ module Legion
               raise(e) unless row
 
               [row, false]
-            end
-
-            # Extract or fall back to find a response_id for linking the tool call.
-            def resolve_response_id(db, response, body, ctx, headers, tool_uuid)
-              return response[:id] if response # rubocop:disable Legion/Extension/RunnerReturnHash
-
-              fallback = fallback_response_for_conversation(db, body, ctx, headers)
-              return fallback[:id] if fallback # rubocop:disable Legion/Extension/RunnerReturnHash
-
-              raise ResponseNotReady, "no response row found for tool call uuid=#{tool_uuid}"
-            end
-
-            def fallback_response_for_conversation(db, body, ctx, headers)
-              conv_id = ctx[:conversation_id] || body[:conversation_id] ||
-                        headers['x-legion-llm-conversation-id']
-              return nil unless conv_id # rubocop:disable Legion/Extension/RunnerReturnHash
-
-              conv = db[:llm_conversations].where(uuid: stable_uuid(conv_id)).first ||
-                     db[:llm_conversations].where(uuid: conv_id).first
-              return nil unless conv # rubocop:disable Legion/Extension/RunnerReturnHash
-
-              db[:llm_message_inference_responses]
-                .join(:llm_message_inference_requests,
-                      id: :message_inference_request_id)
-                .where(Sequel[:llm_message_inference_requests][:conversation_id] => conv[:id])
-                .order(Sequel.desc(Sequel[:llm_message_inference_responses][:id]))
-                .select_all(:llm_message_inference_responses)
-                .first
             end
 
             def find_or_create_tool_call_attempt(db, tool_call_row, tool, body, props, headers, identity_attrs) # rubocop:disable Metrics/CyclomaticComplexity
@@ -263,6 +256,12 @@ module Legion
 
               hex = Digest::SHA256.hexdigest(raw)[0, 32]
               "#{hex[0, 8]}-#{hex[8, 4]}-#{hex[12, 4]}-#{hex[16, 4]}-#{hex[20, 12]}"
+            end
+
+            def tool_write_setting(key, default)
+              ledger = Legion::Settings.dig(:extensions, :llm, :ledger) || {}
+              tool_write = ledger[:tool_write] || {}
+              (tool_write[key] || default).to_i
             end
 
             def insert_with_savepoint(db, table, attributes, operation:)

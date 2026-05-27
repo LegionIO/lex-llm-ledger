@@ -51,9 +51,13 @@ module Legion
 
         def self.default_settings
           {
-            retention: {
+            retention:  {
               default_days: 90,
               phi_ttl_days: 30
+            },
+            tool_write: {
+              response_retry_attempts: 3,
+              response_retry_delay:    1
             }
           }
         end

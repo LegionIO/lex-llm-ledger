@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.5.0] - 2026-05-26
+
+### Changed
+- Tool audit writes no longer dead-letter when the parent response row is missing. The runner retries up to 3 times (1s delay each, configurable via `tool_write` settings), then inserts with a NULL `message_inference_response_id` instead of raising `UnrecoverableMessageError`.
+- Removed `ResponseNotReady` exception class — tool calls are always persisted now.
+- Populate `conversation_id` FK on `llm_tool_calls` from the message payload/headers, providing conversation-level traceability even when the response FK is NULL.
+- Retry configuration moved to `default_settings[:tool_write]` (`response_retry_attempts`, `response_retry_delay`) — tunable at runtime without code changes.
+
+### Requires
+- legion-data >= 1.8.9 (migrations 116-117)
+
+## [0.4.3] - 2026-05-22
+
+### Fixed
+- Persist `llm.registry.availability` publisher identity from current transport headers into `llm_registry_availability_records`, including best-effort `identity_principal_id` and `identity_id` from DB id headers.
+- Preserve legacy identity header and body fallbacks for registry availability records when current transport identity headers are absent.
+
 ## [0.4.2] - 2026-05-22
 
 ### Fixed
