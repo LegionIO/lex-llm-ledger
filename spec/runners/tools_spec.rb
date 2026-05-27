@@ -204,22 +204,22 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Tools do
     end
 
     context 'when no inference response exists for the request' do
-      it 'raises UnrecoverableMessageError so the subscription rejects without requeue when parent rows are missing' do
-        expect do
-          described_class.write_tool_record(decrypted_body, metadata)
-        end.to raise_error(Legion::Extensions::Actors::UnrecoverableMessageError, /no response row found/)
+      it 'inserts the tool call with null response_id when parent rows are missing' do
+        result = described_class.write_tool_record(decrypted_body, metadata)
 
-        expect(db[:llm_tool_calls].count).to eq(0)
+        expect(result[:result]).to eq(:ok)
+        expect(db[:llm_tool_calls].count).to eq(1)
+        expect(db[:llm_tool_calls].first[:message_inference_response_id]).to be_nil
       end
 
-      it 'raises UnrecoverableMessageError when request exists before response commit' do
+      it 'inserts with null response_id when request exists but response is not yet committed' do
         seed_inference_request
 
-        expect do
-          described_class.write_tool_record(decrypted_body, metadata)
-        end.to raise_error(Legion::Extensions::Actors::UnrecoverableMessageError, /no response row found/)
+        result = described_class.write_tool_record(decrypted_body, metadata)
 
-        expect(db[:llm_tool_calls].count).to eq(0)
+        expect(result[:result]).to eq(:ok)
+        expect(db[:llm_tool_calls].count).to eq(1)
+        expect(db[:llm_tool_calls].first[:message_inference_response_id]).to be_nil
       end
     end
 
