@@ -132,6 +132,7 @@ module Legion
                                            status:                        status,
                                            requested_at:                  ts[:tool_start] || tool[:started_at],
                                            completed_at:                  ts[:tool_end] || tool[:finished_at],
+                                           schema_version:                Writers::OfficialRecordWriter::SCHEMA_VERSION,
                                            **identity_attrs,
                                            inserted_at:                   Time.now.utc
                                          }, operation: 'write_tool_record.tool_call')
@@ -175,6 +176,7 @@ module Legion
                                            result_ref:     sha256_ref(tool[:result] || body[:result]),
                                            started_at:     ts[:tool_start] || tool[:started_at],
                                            ended_at:       ts[:tool_end] || tool[:finished_at],
+                                           schema_version: Writers::OfficialRecordWriter::SCHEMA_VERSION,
                                            **identity_attrs,
                                            inserted_at:    Time.now.utc
                                          }, operation: 'write_tool_record.attempt')

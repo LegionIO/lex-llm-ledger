@@ -10,6 +10,8 @@ module Legion
       module Ledger
         module Runners
           module Prompts
+            ALLOWED_CLASSIFICATION_LEVELS = %w[public internal confidential restricted].freeze
+
             extend self
 
             def write_prompt_record(payload = nil, metadata = {}, **message)
@@ -137,8 +139,10 @@ module Legion
                 caller_raw: body[:caller], identity: body[:identity], headers: headers
               )
               {
-                caller_identity: identity[:identity],
-                caller_type:     identity[:type]
+                caller_identity:       identity[:identity],
+                caller_type:           identity[:type],
+                __header_principal_id: identity[:principal_id],
+                __header_identity_id:  identity[:identity_id]
               }.compact
             end
 
@@ -165,12 +169,23 @@ module Legion
             end
 
             def official_compliance_payload(body, headers, expires_at)
+              cls = body[:classification] || {}
               {
                 retention_policy:     headers['x-legion-retention'] || body[:retention_policy],
                 expires_at:           expires_at,
-                contains_phi:         headers['x-legion-contains-phi'] == 'true' || body.dig(:classification, :contains_phi),
-                classification_level: body.dig(:classification, :level) || headers['x-legion-classification']
+                contains_phi:         headers['x-legion-contains-phi'] == 'true' || cls[:contains_phi],
+                contains_pii:         cls[:contains_pii] ? true : false,
+                pii_types_json:       Helpers::Json.dump(Array(cls[:pii_types])),
+                classification_level: normalize_classification(cls[:level] || headers['x-legion-classification']),
+                jurisdictions:        Helpers::Json.dump(Array(cls[:jurisdictions]))
               }
+            end
+
+            def normalize_classification(level)
+              return 'internal' if level.nil? || level.to_s.empty? # rubocop:disable Legion/Extension/RunnerReturnHash
+
+              normalized = level.to_s.downcase
+              ALLOWED_CLASSIFICATION_LEVELS.include?(normalized) ? normalized : 'internal'
             end
 
             include Legion::Extensions::Helpers::Lex if Legion::Extensions.const_defined?(:Helpers, false) &&

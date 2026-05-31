@@ -15,6 +15,8 @@ module Legion
           module OfficialRecordWriter
             extend Legion::Logging::Helper
 
+            SCHEMA_VERSION = 13
+
             module_function
 
             def write_prompt(payload)
@@ -63,9 +65,12 @@ module Legion
                                            classification_level:    classification_level(body),
                                            contains_phi:            contains_phi?(body),
                                            contains_pii:            contains_pii?(body),
+                                           pii_types_json:          json_dump(Array(body.dig(:classification, :pii_types))),
+                                           jurisdictions_json:      json_dump(Array(body.dig(:classification, :jurisdictions) || body[:jurisdictions])),
                                            retention_policy:        body[:retention_policy] || 'default',
                                            expires_at:              body[:expires_at],
                                            identity_canonical_name: identity_canonical_name(body),
+                                           schema_version:          SCHEMA_VERSION,
                                            recorded_at:             recorded_at(body),
                                            inserted_at:             Time.now.utc,
                                            created_at:              Time.now.utc,
@@ -121,6 +126,7 @@ module Legion
                                            uuid:                    stable_uuid(request_id),
                                            conversation_id:         conversation[:id],
                                            latest_message_id:       latest_message&.dig(:id),
+                                           parent_request_id:       resolve_parent_request_id(db, body),
                                            caller_principal_id:     caller_refs[:principal_id],
                                            caller_identity_id:      caller_refs[:identity_id],
                                            identity_canonical_name: identity_canonical_name(body),
@@ -137,10 +143,11 @@ module Legion
                                            status:                  'responded',
                                            context_message_count:   Array(body.dig(:request, :messages) || body[:messages]).size,
                                            request_capture_mode:    'full',
-                                           request_json:            json_dump(request_payload(body)),
+                                           request_json:            phi_protect(json_dump(request_payload(body)), contains_phi?(body)),
                                            classification_level:    classification_level(body),
                                            cost_center:             billing(body)[:cost_center],
                                            budget_key:              billing(body)[:budget_id] || billing(body)[:budget_key],
+                                           schema_version:          SCHEMA_VERSION,
                                            requested_at:            recorded_at(body),
                                            inserted_at:             Time.now.utc
                                          }, operation: 'official_record_writer.inference_request')
@@ -194,6 +201,7 @@ module Legion
                 return existing
               end
 
+              phi = contains_phi?(body)
               id = insert_with_savepoint(db, :llm_message_inference_responses, {
                                            uuid:                         response_uuid,
                                            message_inference_request_id: request[:id],
@@ -209,12 +217,13 @@ module Legion
                                            latency_ms:                   integer(body[:latency_ms]),
                                            wall_clock_ms:                integer(body[:wall_clock_ms]),
                                            response_capture_mode:        'full',
-                                           response_json:                json_dump(visible_response(body)),
-                                           response_thinking_json:       json_dump(thinking_response(body)),
+                                           response_json:                phi_protect(json_dump(visible_response(body)), phi),
+                                           response_thinking_json:       phi_protect(json_dump(thinking_response(body)), phi),
                                            dispatch_path:                body[:dispatch_path] || body[:tier],
                                            identity_principal_id:        caller_identity_refs(db, body)[:principal_id],
                                            identity_id:                  caller_identity_refs(db, body)[:identity_id],
                                            identity_canonical_name:      identity_canonical_name(body),
+                                           schema_version:               SCHEMA_VERSION,
                                            responded_at:                 recorded_at(body),
                                            inserted_at:                  Time.now.utc
                                          }, operation: 'official_record_writer.inference_response')
@@ -285,6 +294,7 @@ module Legion
                                            identity_principal_id:         caller_identity_refs(db, body)[:principal_id],
                                            identity_id:                   caller_identity_refs(db, body)[:identity_id],
                                            identity_canonical_name:       identity_canonical_name(body),
+                                           schema_version:                SCHEMA_VERSION,
                                            recorded_at:                   recorded_at(body),
                                            inserted_at:                   Time.now.utc
                                          }, operation: 'official_record_writer.inference_metric')
@@ -377,6 +387,10 @@ module Legion
                 explicit_identity_id = integer_or_nil(body[:caller_identity_id] || body.dig(:caller, :requested_by, :id))
                 explicit_principal_id = integer_or_nil(body[:caller_principal_id] ||
                                                        body.dig(:caller, :requested_by, :principal_id))
+
+                explicit_identity_id ||= integer_or_nil(body[:__header_identity_id])
+                explicit_principal_id ||= integer_or_nil(body[:__header_principal_id])
+
                 refs = { principal_id: explicit_principal_id, identity_id: explicit_identity_id }.compact
                 unless refs[:principal_id] && refs[:identity_id]
                   if explicit_identity_id && !explicit_principal_id && identity_tables_available?(db)
@@ -554,6 +568,18 @@ module Legion
               int.positive? ? int : nil
             end
 
+            def resolve_parent_request_id(db, body)
+              parent_ref = body[:parent_request_id] || body.dig(:context, :parent_request_id)
+              return nil unless present?(parent_ref)
+
+              if parent_ref.is_a?(Integer)
+                parent_ref
+              else
+                parent = db[:llm_message_inference_requests].where(request_ref: parent_ref.to_s).first
+                parent&.dig(:id)
+              end
+            end
+
             def correlation_id(body)
               reference(body, :correlation_id, :correlation_ref) || body.dig(:tracing, :correlation_id)
             end
@@ -656,8 +682,14 @@ module Legion
               body.dig(:response, :finish_reason) || body.dig(:response, :stop, :reason)
             end
 
+            ALLOWED_CLASSIFICATION_LEVELS = %w[public internal confidential restricted].freeze
+
             def classification_level(body)
-              body[:classification_level] || body.dig(:classification, :level)
+              raw = body[:classification_level] || body.dig(:classification, :level)
+              return 'internal' if raw.nil? || raw.to_s.empty?
+
+              normalized = raw.to_s.downcase
+              ALLOWED_CLASSIFICATION_LEVELS.include?(normalized) ? normalized : 'internal'
             end
 
             def contains_phi?(body)
@@ -704,6 +736,19 @@ module Legion
               return content if content.is_a?(String)
 
               json_dump(content)
+            end
+
+            def phi_protect(json_string, is_phi)
+              return json_string unless is_phi && crypt_available?
+
+              Legion::Crypt.encrypt(json_string)
+            rescue StandardError => e
+              handle_exception(e, level: :warn, handled: true, operation: 'official_record_writer.phi_encrypt')
+              json_string
+            end
+
+            def crypt_available?
+              defined?(Legion::Crypt) && Legion::Crypt.respond_to?(:encrypt)
             end
 
             def json_dump(value)
