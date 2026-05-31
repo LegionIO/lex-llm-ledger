@@ -21,6 +21,7 @@ require_relative 'ledger/runners/tools'
 require_relative 'ledger/runners/skills'
 require_relative 'ledger/runners/escalations'
 require_relative 'ledger/runners/retention_purge'
+require_relative 'ledger/runners/reconciliation'
 require_relative 'ledger/runners/usage_reporter'
 require_relative 'ledger/runners/provider_stats'
 require_relative 'ledger/runners/registry_availability'
@@ -43,6 +44,7 @@ if defined?(Legion::Extensions) && Legion::Extensions.const_defined?(:Core, fals
   require_relative 'ledger/actors/escalations'
   require_relative 'ledger/actors/registry_availability'
   require_relative 'ledger/actors/retention_purge'
+  require_relative 'ledger/actors/reconciliation'
   require_relative 'ledger/actors/spool_flush'
 end
 
