@@ -10,7 +10,7 @@ module Legion
 
             def health_report
               ds = official_metrics
-                   .where { Sequel[:llm_message_inference_metrics][:inserted_at] >= Time.now.utc - 86_400 }
+                   .where { Sequel[:llm_message_inference_metrics][:recorded_at] >= Time.now.utc - 86_400 }
                    .select_group(
                      Sequel[:llm_message_inference_metrics][:provider],
                      Sequel[:llm_message_inference_responses][:provider_instance],

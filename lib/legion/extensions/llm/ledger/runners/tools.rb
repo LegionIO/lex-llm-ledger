@@ -23,11 +23,6 @@ module Legion
               ctx  = body[:message_context] || {}
               tool = body[:tool_call]       || {}
 
-              Helpers::Retention.resolve(
-                retention:    headers['x-legion-retention'],
-                contains_phi: headers['x-legion-contains-phi'] == 'true'
-              )
-
               db = ::Legion::Data.connection
               response = find_or_resolve_response_with_retry(db, body, ctx, props, headers)
               write_result = [:ok]

@@ -13,7 +13,7 @@ module Legion
             PHI_TTL_DEFAULT_DAYS = 30
 
             RETENTION_MAP = {
-              'session_only' => nil,
+              'session_only' => 0,
               'days_30'      => 30,
               'days_90'      => 90,
               'permanent'    => nil
