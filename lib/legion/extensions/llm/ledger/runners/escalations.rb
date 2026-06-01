@@ -49,32 +49,39 @@ module Legion
               Helpers::SubscriptionMessage.runner_args(payload, metadata, message)
             end
 
-            def build_escalation_record(db, body, props, headers)
+            def build_escalation_record(db, body, props, headers) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+              history = Array(body[:history])
               identity = Helpers::CallerIdentity.normalize(
                 caller_raw: body[:caller], identity: body[:identity], headers: headers
               )
+
+              first_attempt = history.first || {}
+              last_attempt = history.last || {}
 
               {
                 uuid:                    stable_uuid(props[:message_id] || body[:event_id] || SecureRandom.uuid),
                 conversation_id:         resolve_conversation_id(db, body, headers),
                 request_ref:             body[:request_id] || props[:correlation_id],
-                from_provider:           body[:from_provider] || body.dig(:escalation, :from_provider),
-                from_instance:           body[:from_instance] || body.dig(:escalation, :from_instance),
-                from_model:              body[:from_model] || body.dig(:escalation, :from_model),
-                to_provider:             body[:to_provider] || body.dig(:escalation, :to_provider),
-                to_instance:             body[:to_instance] || body.dig(:escalation, :to_instance),
-                to_model:                body[:to_model] || body.dig(:escalation, :to_model),
-                reason:                  body[:reason] || body.dig(:escalation, :reason),
-                error_category:          body[:error_category] || body.dig(:escalation, :error_category),
-                attempt_no:              (body[:attempt_no] || body.dig(:escalation, :attempt_no)).to_i,
-                latency_ms:              body[:latency_ms].to_i,
+                from_provider:           first_attempt[:provider] || body[:from_provider],
+                from_instance:           first_attempt[:instance] || body[:from_instance],
+                from_model:              first_attempt[:model] || body[:from_model],
+                to_provider:             last_attempt[:provider] || body[:to_provider],
+                to_instance:             last_attempt[:instance] || body[:to_instance],
+                to_model:                last_attempt[:model] || body[:to_model],
+                reason:                  body[:reason] || (first_attempt[:outcome] == 'failure' ? 'provider_failover' : nil),
+                error_category:          body[:error_category] || extract_error_category(first_attempt),
+                attempt_no:              history.size || (body[:attempt_no] || 1),
+                latency_ms:              history.sum { |a| (a[:duration_ms] || 0).to_i } || body[:latency_ms].to_i,
                 identity_canonical_name: identity[:identity],
                 identity_principal_id:   identity[:principal_id],
                 identity_id:             identity[:identity_id],
+                history_json:            history.any? ? Helpers::Json.dump(history) : nil,
+                outcome:                 body[:outcome]&.to_s,
+                total_attempts:          body[:attempts] ? body[:attempts].to_i : history.size,
                 schema_version:          Writers::OfficialRecordWriter::SCHEMA_VERSION,
                 recorded_at:             body[:recorded_at] || body[:timestamp] || Time.now.utc,
                 inserted_at:             Time.now.utc
-              }
+              }.compact
             end
 
             def resolve_conversation_id(db, body, headers)
@@ -84,6 +91,11 @@ module Legion
               conv = db[:llm_conversations].where(uuid: stable_uuid(conv_ref)).first ||
                      db[:llm_conversations].where(uuid: conv_ref).first
               conv&.[](:id)
+            end
+
+            def extract_error_category(attempt)
+              failures = Array(attempt[:failures])
+              failures.first.is_a?(Hash) ? failures.first[:category].to_s : nil
             end
 
             def stable_uuid(value)

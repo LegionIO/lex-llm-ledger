@@ -15,7 +15,7 @@ module Legion
           module OfficialRecordWriter
             extend Legion::Logging::Helper
 
-            SCHEMA_VERSION = 13
+            SCHEMA_VERSION = 15
 
             module_function
 
@@ -115,7 +115,7 @@ module Legion
               end
             end
 
-            def find_or_create_request(db, conversation, latest_message, body)
+            def find_or_create_request(db, conversation, latest_message, body) # rubocop:disable Metrics/AbcSize
               request_id = request_ref(body)
               existing = db[:llm_message_inference_requests].where(request_ref: request_id).first
               return enrich_request!(db, existing, body, latest_message) if existing
@@ -147,6 +147,11 @@ module Legion
                                            classification_level:    classification_level(body),
                                            cost_center:             billing(body)[:cost_center],
                                            budget_key:              billing(body)[:budget_id] || billing(body)[:budget_key],
+                                           injected_tool_count:     Array(body.dig(:audit, :injected_tools) || body[:injected_tools]).size,
+                                           context_tokens:          resolve_context_tokens(body),
+                                           request_content_hash:    compute_content_hash(body.dig(:request, :content) || body.dig(:audit, :request_content)),
+                                           curation_strategy:       body[:curation_strategy] || body.dig(:audit, :curation_strategy),
+                                           tool_policy:             body[:tool_policy] || body.dig(:audit, :tool_policy),
                                            schema_version:          SCHEMA_VERSION,
                                            requested_at:            recorded_at(body),
                                            inserted_at:             Time.now.utc
@@ -193,8 +198,8 @@ module Legion
               end
             end
 
-            def find_or_create_response(db, request, response_message, body)
-              response_uuid = stable_uuid(reference(body, :provider_response_ref) || "response:#{request_ref(body)}")
+            def find_or_create_response(db, request, response_message, body) # rubocop:disable Metrics/AbcSize
+              response_uuid = stable_uuid(reference(body, :provider_response_ref) || "response:#{request_ref(body)}:#{body[:provider] || 'unknown'}")
               existing = db[:llm_message_inference_responses].where(uuid: response_uuid).first
               if existing
                 enrich_response!(db, existing, response_message, body)
@@ -220,6 +225,12 @@ module Legion
                                            response_json:                phi_protect(json_dump(visible_response(body)), phi),
                                            response_thinking_json:       phi_protect(json_dump(thinking_response(body)), phi),
                                            dispatch_path:                body[:dispatch_path] || body[:tier],
+                                           error_category:               body[:error_category] || body.dig(:error, :category),
+                                           error_code:                   body[:error_code] || body.dig(:error, :code),
+                                           error_message:                body[:error_message] || body.dig(:error, :message),
+                                           response_content_hash:        compute_content_hash(body[:response_content] || body.dig(:audit, :response_content)),
+                                           route_attempts:               (body[:route_attempts] || body.dig(:audit, :route_attempts)).to_i,
+                                           escalation_chain_ref:         body[:escalation_chain_ref],
                                            identity_principal_id:        caller_identity_refs(db, body)[:principal_id],
                                            identity_id:                  caller_identity_refs(db, body)[:identity_id],
                                            identity_canonical_name:      identity_canonical_name(body),
@@ -772,6 +783,20 @@ module Legion
 
             def present?(value)
               !value.nil? && !(value.respond_to?(:empty?) && value.empty?)
+            end
+
+            def compute_content_hash(content)
+              return nil if content.nil? || content.to_s.empty?
+
+              Digest::SHA256.hexdigest(json_dump(content))[0..31]
+            end
+
+            def resolve_context_tokens(body)
+              raw = body[:tokens] || body[:audit] || body
+              val = raw[:input_tokens] || raw[:input] || raw[:context_tokens] || raw[:prompt_tokens]
+              return nil unless present?(val)
+
+              val.to_i
             end
           end
         end
