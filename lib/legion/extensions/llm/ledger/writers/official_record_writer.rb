@@ -788,9 +788,7 @@ module Legion
             def resolve_context_tokens(body)
               raw = body[:tokens] || body[:audit] || body
               val = raw[:input_tokens] || raw[:input] || raw[:context_tokens] || raw[:prompt_tokens]
-              return nil unless present?(val)
-
-              val.to_i
+              present?(val) ? val.to_i : 0
             end
           end
         end
