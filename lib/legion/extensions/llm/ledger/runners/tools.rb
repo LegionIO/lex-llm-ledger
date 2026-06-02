@@ -140,7 +140,6 @@ module Legion
                                            requires_human_approval:       tool[:requires_human_approval],
                                            requested_at:                  ts[:tool_start] || tool[:started_at],
                                            completed_at:                  ts[:tool_end] || tool[:finished_at],
-                                           schema_version:                Writers::OfficialRecordWriter::SCHEMA_VERSION,
                                            **identity_attrs,
                                            inserted_at:                   Time.now.utc
                                          }, operation: 'write_tool_record.tool_call')
@@ -187,7 +186,6 @@ module Legion
                                            error_details_json:  tool[:error] ? Helpers::Json.dump(tool[:error]) : nil,
                                            started_at:          ts[:tool_start] || tool[:started_at],
                                            ended_at:            ts[:tool_end] || tool[:finished_at],
-                                           schema_version:      Writers::OfficialRecordWriter::SCHEMA_VERSION,
                                            **identity_attrs,
                                            inserted_at:         Time.now.utc
                                          }, operation: 'write_tool_record.attempt')

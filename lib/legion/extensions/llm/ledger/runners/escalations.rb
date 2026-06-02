@@ -78,7 +78,6 @@ module Legion
                 history_json:            history.any? ? Helpers::Json.dump(history) : nil,
                 outcome:                 body[:outcome]&.to_s,
                 total_attempts:          body[:attempts] ? body[:attempts].to_i : history.size,
-                schema_version:          Writers::OfficialRecordWriter::SCHEMA_VERSION,
                 recorded_at:             body[:recorded_at] || body[:timestamp] || Time.now.utc,
                 inserted_at:             Time.now.utc
               }.compact

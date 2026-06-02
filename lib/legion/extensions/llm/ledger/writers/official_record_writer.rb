@@ -15,8 +15,6 @@ module Legion
           module OfficialRecordWriter
             extend Legion::Logging::Helper
 
-            SCHEMA_VERSION = 15
-
             module_function
 
             def write_prompt(payload)
@@ -70,7 +68,6 @@ module Legion
                                            retention_policy:        body[:retention_policy] || 'default',
                                            expires_at:              body[:expires_at],
                                            identity_canonical_name: identity_canonical_name(body),
-                                           schema_version:          SCHEMA_VERSION,
                                            recorded_at:             recorded_at(body),
                                            inserted_at:             Time.now.utc,
                                            created_at:              Time.now.utc,
@@ -152,7 +149,6 @@ module Legion
                                            request_content_hash:    compute_content_hash(body.dig(:request, :content) || body.dig(:audit, :request_content)),
                                            curation_strategy:       body[:curation_strategy] || body.dig(:audit, :curation_strategy),
                                            tool_policy:             body[:tool_policy] || body.dig(:audit, :tool_policy),
-                                           schema_version:          SCHEMA_VERSION,
                                            requested_at:            recorded_at(body),
                                            inserted_at:             Time.now.utc
                                          }, operation: 'official_record_writer.inference_request')
@@ -234,7 +230,6 @@ module Legion
                                            identity_principal_id:        caller_identity_refs(db, body)[:principal_id],
                                            identity_id:                  caller_identity_refs(db, body)[:identity_id],
                                            identity_canonical_name:      identity_canonical_name(body),
-                                           schema_version:               SCHEMA_VERSION,
                                            responded_at:                 recorded_at(body),
                                            inserted_at:                  Time.now.utc
                                          }, operation: 'official_record_writer.inference_response')
@@ -305,7 +300,6 @@ module Legion
                                            identity_principal_id:         caller_identity_refs(db, body)[:principal_id],
                                            identity_id:                   caller_identity_refs(db, body)[:identity_id],
                                            identity_canonical_name:       identity_canonical_name(body),
-                                           schema_version:                SCHEMA_VERSION,
                                            recorded_at:                   recorded_at(body),
                                            inserted_at:                   Time.now.utc
                                          }, operation: 'official_record_writer.inference_metric')

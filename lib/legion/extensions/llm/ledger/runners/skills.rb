@@ -67,7 +67,6 @@ module Legion
                 identity_canonical_name: identity[:identity],
                 identity_principal_id:   identity[:principal_id],
                 identity_id:             identity[:identity_id],
-                schema_version:          Writers::OfficialRecordWriter::SCHEMA_VERSION,
                 recorded_at:             body[:recorded_at] || body[:timestamp] || Time.now.utc,
                 inserted_at:             Time.now.utc
               }
