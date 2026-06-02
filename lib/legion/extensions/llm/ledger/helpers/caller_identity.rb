@@ -18,12 +18,16 @@ module Legion
               extension = hash_value(caller_hash, :extension)
               type = first_present(
                 hash_value(identity_hash, :type),
+                hash_value(identity_hash, :kind),
+                header_value(headers, 'x-legion-identity-kind'),
                 header_value(headers, 'x-legion-caller-type'),
                 hash_value(caller, :type),
+                hash_value(caller, :kind),
                 extension && 'extension'
               )
 
               raw_identity = first_present(
+                header_value(headers, 'x-legion-identity-canonical-name'),
                 hash_value(identity_hash, :id),
                 hash_value(identity_hash, :canonical_name),
                 hash_value(identity_hash, :identity),
@@ -38,8 +42,10 @@ module Legion
               )
 
               {
-                identity: normalize_identity_value(raw_identity, type),
-                type:     type
+                identity:     normalize_identity_value(raw_identity, type),
+                type:         type,
+                principal_id: integer_header(headers, 'x-legion-identity-db-principal-id'),
+                identity_id:  integer_header(headers, 'x-legion-identity-db-identity-id')
               }.compact
             end
 
@@ -69,6 +75,14 @@ module Legion
               return nil unless headers.respond_to?(:key?)
 
               headers[key] || headers[key.to_sym]
+            end
+
+            def integer_header(headers, key)
+              raw = header_value(headers, key)
+              return nil if raw.nil?
+
+              int = raw.to_i
+              int.positive? ? int : nil
             end
 
             def present?(value)

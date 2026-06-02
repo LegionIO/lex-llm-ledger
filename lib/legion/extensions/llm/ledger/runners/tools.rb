@@ -23,11 +23,6 @@ module Legion
               ctx  = body[:message_context] || {}
               tool = body[:tool_call]       || {}
 
-              Helpers::Retention.resolve(
-                retention:    headers['x-legion-retention'],
-                contains_phi: headers['x-legion-contains-phi'] == 'true'
-              )
-
               db = ::Legion::Data.connection
               response = find_or_resolve_response_with_retry(db, body, ctx, props, headers)
               write_result = [:ok]
@@ -106,7 +101,7 @@ module Legion
               conv&.[](:id)
             end
 
-            def find_or_create_tool_call(db, response, body, ctx, tool, headers, identity_attrs, conversation_id)
+            def find_or_create_tool_call(db, response, body, ctx, tool, headers, identity_attrs, conversation_id) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
               tool_uuid = derive_tool_call_uuid(body, ctx, tool, headers)
               existing  = db[:llm_tool_calls].where(uuid: tool_uuid).first
               return [existing, false] if existing # rubocop:disable Legion/Extension/RunnerReturnHash
@@ -125,6 +120,8 @@ module Legion
               status = tool[:status] || headers['x-legion-tool-status'] || 'success'
               ts     = body[:timestamps] || {}
 
+              result_value = tool[:result] || body[:result]
+              has_result = tool[:result] || body.key?(:result)
               id = insert_with_savepoint(db, :llm_tool_calls, {
                                            uuid:                          tool_uuid,
                                            message_inference_response_id: response_id,
@@ -135,6 +132,12 @@ module Legion
                                            tool_source_type:              src[:type] || headers['x-legion-tool-source-type'],
                                            tool_source_server:            src[:server] || headers['x-legion-tool-source-server'],
                                            status:                        status,
+                                           tool_arguments_json:           tool[:arguments] ? Helpers::Json.dump(tool[:arguments]) : nil,
+                                           tool_result_json:              has_result ? Helpers::Json.dump(result_value) : nil,
+                                           tool_category:                 tool[:category] || tool[:tool_category],
+                                           data_handling_classification:  tool[:data_handling_classification],
+                                           policy_decision:               tool[:policy_decision],
+                                           requires_human_approval:       tool[:requires_human_approval],
                                            requested_at:                  ts[:tool_start] || tool[:started_at],
                                            completed_at:                  ts[:tool_end] || tool[:finished_at],
                                            **identity_attrs,
@@ -149,7 +152,7 @@ module Legion
               [row, false]
             end
 
-            def find_or_create_tool_call_attempt(db, tool_call_row, tool, body, props, headers, identity_attrs) # rubocop:disable Metrics/CyclomaticComplexity
+            def find_or_create_tool_call_attempt(db, tool_call_row, tool, body, props, headers, identity_attrs) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/AbcSize
               return nil unless tool_call_row # rubocop:disable Legion/Extension/RunnerReturnHash
 
               tool_call_id = tool_call_row[:id]
@@ -167,21 +170,24 @@ module Legion
               runner_ref = body[:worker_id] || body[:runner_ref] || props[:app_id]
 
               id = insert_with_savepoint(db, :llm_tool_call_attempts, {
-                                           uuid:           attempt_uuid,
-                                           tool_call_id:   tool_call_id,
-                                           attempt_no:     attempt_no,
-                                           runner_ref:     runner_ref,
-                                           status:         status,
-                                           error_category: error_hash[:category] || error_hash[:type],
-                                           error_code:     error_hash[:code],
-                                           error_message:  error_info.is_a?(String) ? error_info : error_hash[:message],
-                                           duration_ms:    tool[:duration_ms].to_i,
-                                           arguments_ref:  sha256_ref(tool[:arguments]),
-                                           result_ref:     sha256_ref(tool[:result] || body[:result]),
-                                           started_at:     ts[:tool_start] || tool[:started_at],
-                                           ended_at:       ts[:tool_end] || tool[:finished_at],
+                                           uuid:                attempt_uuid,
+                                           tool_call_id:        tool_call_id,
+                                           attempt_no:          attempt_no,
+                                           runner_ref:          runner_ref,
+                                           status:              status,
+                                           error_category:      error_hash[:category] || error_hash[:type],
+                                           error_code:          error_hash[:code],
+                                           error_message:       error_info.is_a?(String) ? error_info : error_hash[:message],
+                                           duration_ms:         tool[:duration_ms].to_i,
+                                           arguments_ref:       sha256_ref(tool[:arguments]),
+                                           result_ref:          sha256_ref(tool[:result] || body[:result]),
+                                           attempt_input_json:  tool[:arguments] ? Helpers::Json.dump(tool[:arguments]) : nil,
+                                           attempt_output_json: Helpers::Json.dump(tool[:result] || body[:result]),
+                                           error_details_json:  tool[:error] ? Helpers::Json.dump(tool[:error]) : nil,
+                                           started_at:          ts[:tool_start] || tool[:started_at],
+                                           ended_at:            ts[:tool_end] || tool[:finished_at],
                                            **identity_attrs,
-                                           inserted_at:    Time.now.utc
+                                           inserted_at:         Time.now.utc
                                          }, operation: 'write_tool_record.attempt')
               db[:llm_tool_call_attempts][id: id]
             rescue Sequel::UniqueConstraintViolation => e

@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.6.0] - 2026-05-31
+
+### Added
+- **Skills audit actor** — new queue `llm.audit.skills`, actor, and runner consuming `audit.skill.#` events from the `llm.audit` exchange. Creates `llm_skill_events` records.
+- **Escalation audit actor** — new exchange `llm.escalation` binding, queue `llm.audit.escalations`, actor, and runner. Creates `llm_escalation_events` records.
+- **Retention purge actor** — actively deletes expired records (hourly, batched). Enforces `session_only` and PHI TTL retention policies that were previously passive.
+- **Reconciliation actor** — links orphaned tool calls (null `response_id`) and metering requests (null `latest_message_id`) within a 5-minute lookback window every 2 minutes.
+- **Migration 013** — `parent_request_id` FK on requests, `schema_version` on all official tables, `pii_types_json` and `jurisdictions_json` on conversations.
+- **Migration 014** — creates `llm_skill_events` and `llm_escalation_events` tables.
+- **PHI field-level encryption** — `request_json`, `response_json`, `response_thinking_json` encrypted at rest via `Legion::Crypt` when `contains_phi: true`.
+
+### Fixed
+- **LEDGER-01**: `session_only` retention maps to 0 days (immediate expiry) instead of `nil`, distinguishing it from `permanent`.
+- **IDENTITY-05**: `CallerIdentity.normalize` recognizes transport identity headers (`x-legion-identity-canonical-name`, `x-legion-identity-kind`, `x-legion-identity-db-*`).
+- **IDENTITY-06**: `OfficialRecordWriter.caller_identity_refs` falls back to pre-resolved AMQP header IDs.
+- **GAP-06**: `ProviderStats#health_report` uses `recorded_at` instead of `inserted_at` for 24h window.
+- **GAP-10**: Backfill `metering_payload` maps `provider_instance` from correct column.
+- **GAP-11**: Backfill `registry_reason` extracts from metadata JSON instead of storing raw blob.
+- Dead `Retention.resolve` call removed from tools runner.
+
+### Changed
+- **Jurisdictions** stored as JSON array instead of comma-joined string.
+- **Classification level** validated against controlled vocabulary (`public`/`internal`/`confidential`/`restricted`), defaults to `internal`.
+- **Schema version** written to all official table inserts (constant `SCHEMA_VERSION = 13`).
+- All CallerIdentity-resolved payloads now pass `__header_principal_id`/`__header_identity_id` for direct FK resolution.
+
+### Requires
+- legion-data >= 1.8.9 (migrations 013-014)
+
 ## [0.5.0] - 2026-05-26
 
 ### Changed

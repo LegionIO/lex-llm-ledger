@@ -26,6 +26,7 @@ module TestDb
     db = Sequel.sqlite
     Sequel::Migrator.run(db, legion_data_migration_dir)
     ensure_identity_columns!(db)
+    ensure_audit_columns!(db)
     migration_dir = File.expand_path('../../lib/legion/extensions/llm/ledger/data/migrations', __dir__)
     Sequel::Migrator.run(db, migration_dir, table: :schema_migrations_lex_llm_ledger)
     db
@@ -70,6 +71,42 @@ module TestDb
     db.alter_table(table) do
       add_column :runtime_caller_class, String, size: 255, null: true unless columns.include?(:runtime_caller_class)
       add_column :runtime_caller_client, String, size: 255, null: true unless columns.include?(:runtime_caller_client)
+    end
+  end
+
+  # Safety net: columns added by legion-data migrations 123-128 that may not
+  # be on disk yet when the ledger runs against an older legion-data release.
+  def ensure_audit_columns!(db)
+    # llm_tool_calls (migration 123)
+    ensure_columns(db, :llm_tool_calls,
+                   %i[tool_arguments_json tool_result_json tool_category data_handling_classification
+                      policy_decision requires_human_approval])
+
+    # llm_tool_call_attempts (migration 124)
+    ensure_columns(db, :llm_tool_call_attempts,
+                   %i[attempt_input_json attempt_output_json error_details_json])
+
+    # llm_escalation_events (migration 125)
+    ensure_columns(db, :llm_escalation_events,
+                   %i[history_json outcome total_attempts])
+
+    # llm_message_inference_responses (migration 126)
+    ensure_columns(db, :llm_message_inference_responses,
+                   %i[route_attempts escalation_chain_ref])
+
+    # llm_message_inference_requests (migration 127)
+    ensure_columns(db, :llm_message_inference_requests,
+                   %i[parent_request_id])
+  end
+
+  def ensure_columns(db, table, columns)
+    return unless db.table_exists?(table)
+
+    existing = db[table].columns
+    db.alter_table(table) do
+      columns.each do |col|
+        add_column(col, String, text: true) unless existing.include?(col)
+      end
     end
   end
 end

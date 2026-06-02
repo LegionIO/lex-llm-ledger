@@ -56,14 +56,14 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Helpers::Retention do
     end
 
     context 'with session_only retention' do
-      it 'returns nil (lifecycle driven by session close, not TTL)' do
+      it 'returns immediate expiry (0 days from now)' do
         result = described_class.resolve(retention: 'session_only', contains_phi: false)
-        expect(result).to be_nil
+        expect(result).to be_within(2).of(Time.now.utc)
       end
 
-      it 'caps at PHI TTL when PHI flagged' do
+      it 'returns immediate expiry even when PHI flagged (already shorter than PHI cap)' do
         result = described_class.resolve(retention: 'session_only', contains_phi: true)
-        expect(result).to be_within(2).of(Time.now.utc + (30 * 86_400))
+        expect(result).to be_within(2).of(Time.now.utc)
       end
     end
 

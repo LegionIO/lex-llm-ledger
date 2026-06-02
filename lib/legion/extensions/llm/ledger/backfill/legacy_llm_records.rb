@@ -110,7 +110,8 @@ module Legion
                 exchange_id:       row[:exchange_id],
                 operation:         row[:request_type],
                 provider:          row[:provider],
-                provider_instance: row[:worker_id],
+                provider_instance: row[:provider_instance],
+                worker_id:         row[:worker_id],
                 model_id:          row[:model_id],
                 tier:              row[:tier],
                 input_tokens:      row[:input_tokens],
@@ -161,7 +162,7 @@ module Legion
                            model_key:   row[:model_id],
                            event_type:  row[:event_type],
                            status:      registry_status(row),
-                           reason:      row[:metadata_json],
+                           reason:      registry_reason(row),
                            recorded_at: row[:occurred_at],
                            inserted_at: Time.now.utc
                          }, operation: 'legacy_llm_backfill.registry_event')
@@ -195,6 +196,11 @@ module Legion
             def registry_status(row)
               health = json_load(row[:health_json])
               health[:status] || health['status'] || row[:event_type] || 'unknown'
+            end
+
+            def registry_reason(row)
+              metadata = json_load(row[:metadata_json])
+              metadata[:reason] || metadata['reason'] || metadata[:message] || metadata['message'] || row[:event_type]
             end
 
             def table_present?(table)

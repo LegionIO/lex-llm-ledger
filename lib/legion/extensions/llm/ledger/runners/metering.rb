@@ -92,18 +92,20 @@ module Legion
                 caller_raw: payload[:caller], identity: payload[:identity], headers: headers
               )
               payload.merge(
-                message_id:        props[:message_id] || payload[:message_id] || ctx[:message_id],
-                correlation_id:    props[:correlation_id] || payload[:correlation_id],
-                conversation_id:   ctx[:conversation_id] || payload[:conversation_id],
-                request_id:        ctx[:request_id] || payload[:request_id],
-                exchange_id:       ctx[:exchange_id] || payload[:exchange_id],
-                operation:         payload[:operation] || payload[:request_type] || headers['x-legion-llm-request-type'],
-                provider:          payload[:provider] || headers['x-legion-llm-provider'],
-                provider_instance: payload[:provider_instance] || payload[:instance],
-                model_id:          payload[:model_id] || headers['x-legion-llm-model'],
-                tier:              payload[:tier] || headers['x-legion-llm-tier'],
-                caller_identity:   identity[:identity],
-                caller_type:       identity[:type]
+                message_id:            props[:message_id] || payload[:message_id] || ctx[:message_id],
+                correlation_id:        props[:correlation_id] || payload[:correlation_id],
+                conversation_id:       ctx[:conversation_id] || payload[:conversation_id],
+                request_id:            ctx[:request_id] || payload[:request_id],
+                exchange_id:           ctx[:exchange_id] || payload[:exchange_id],
+                operation:             payload[:operation] || payload[:request_type] || headers['x-legion-llm-request-type'],
+                provider:              payload[:provider] || headers['x-legion-llm-provider'],
+                provider_instance:     payload[:provider_instance] || payload[:instance],
+                model_id:              payload[:model_id] || headers['x-legion-llm-model'],
+                tier:                  payload[:tier] || headers['x-legion-llm-tier'],
+                caller_identity:       identity[:identity],
+                caller_type:           identity[:type],
+                __header_principal_id: identity[:principal_id],
+                __header_identity_id:  identity[:identity_id]
               )
             end
 
