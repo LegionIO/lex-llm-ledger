@@ -574,7 +574,7 @@ module Legion
             end
 
             def resolve_parent_request_id(db, body)
-              parent_ref = body[:parent_request_id] || body.dig(:context, :parent_request_id)
+              parent_ref = body[:parent_request_id] || body.dig(:context, :parent_request_id) || body.dig(:caller, :parent_request_ref)
               return nil unless present?(parent_ref)
 
               if parent_ref.is_a?(Integer)
