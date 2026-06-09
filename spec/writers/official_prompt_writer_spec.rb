@@ -261,13 +261,12 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Writers::OfficialPromptWriter do
       expect(thinking_json['content']).to eq('explicit thinking')
     end
 
-    it 'stores empty thinking when no tags and no explicit thinking present' do
+    it 'stores nil thinking when no tags and no explicit thinking present' do
       described_class.write(payload.merge(response: 'plain response text', response_thinking: nil))
 
       response = Legion::Data.connection[:llm_message_inference_responses].first
-      thinking_json = JSON.parse(response[:response_thinking_json])
 
-      expect(thinking_json).to eq({})
+      expect(response[:response_thinking_json]).to be_nil
     end
   end
 

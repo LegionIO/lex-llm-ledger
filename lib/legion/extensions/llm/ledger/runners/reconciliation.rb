@@ -28,8 +28,16 @@ module Legion
                 response = find_response_for_tool_call(db, tool_call)
                 next unless response
 
+                # Recalculate tool_call_index to avoid unique constraint collisions.
+                # Orphaned tool calls were inserted with index 0 (no response known),
+                # but the response may already have tool calls at those indices.
+                next_index = db[:llm_tool_calls]
+                             .where(message_inference_response_id: response[:id])
+                             .max(:tool_call_index).to_i + 1
+
                 db[:llm_tool_calls].where(id: tool_call[:id]).update(
-                  message_inference_response_id: response[:id]
+                  message_inference_response_id: response[:id],
+                  tool_call_index:               next_index
                 )
                 linked += 1
               end

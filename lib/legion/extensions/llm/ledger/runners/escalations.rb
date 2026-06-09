@@ -49,7 +49,7 @@ module Legion
               Helpers::SubscriptionMessage.runner_args(payload, metadata, message)
             end
 
-            def build_escalation_record(db, body, props, headers) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+            def build_escalation_record(db, body, props, headers)
               history = Array(body[:history])
               identity = Helpers::CallerIdentity.normalize(
                 caller_raw: body[:caller], identity: body[:identity], headers: headers

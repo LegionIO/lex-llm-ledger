@@ -101,7 +101,7 @@ module Legion
               conv&.[](:id)
             end
 
-            def find_or_create_tool_call(db, response, body, ctx, tool, headers, identity_attrs, conversation_id) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+            def find_or_create_tool_call(db, response, body, ctx, tool, headers, identity_attrs, conversation_id)
               tool_uuid = derive_tool_call_uuid(body, ctx, tool, headers)
               existing  = db[:llm_tool_calls].where(uuid: tool_uuid).first
               return [existing, false] if existing # rubocop:disable Legion/Extension/RunnerReturnHash
@@ -152,7 +152,7 @@ module Legion
               [row, false]
             end
 
-            def find_or_create_tool_call_attempt(db, tool_call_row, tool, body, props, headers, identity_attrs) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/AbcSize
+            def find_or_create_tool_call_attempt(db, tool_call_row, tool, body, props, headers, identity_attrs)
               return nil unless tool_call_row # rubocop:disable Legion/Extension/RunnerReturnHash
 
               tool_call_id = tool_call_row[:id]

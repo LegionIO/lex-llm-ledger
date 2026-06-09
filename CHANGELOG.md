@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.7.0] - 2026-06-09
+
+### Fixed
+- **ASYNC-RACE-01**: Resolved race condition between metering and prompt audit messages causing duplicate response rows and stale `"{}"`/`"null"` JSON placeholders. Added response UUID fallback to `message_inference_request_id` lookup to enrich metering-created shells instead of creating duplicates.
+- **RECONCILIATION-01**: Fixed `UniqueConstraintViolation` in `link_orphaned_tool_calls` by recalculating `tool_call_index` based on existing max index before linking, preventing index collisions.
+- **ENRICHMENT-01**: Implemented strict upsert guards (`upsert_guard?`) to prevent overwriting valid data with `nil`, `''`, or `'{}'`. Centralized validation across `update_if_missing` and `update_if_placeholder`.
+- **PAYLOAD-01**: Updated `request_payload`, `visible_response`, and `thinking_response` to return `nil` instead of `{}` when content is missing. Insert paths now write `nil` to JSON columns, preventing `"{}"` or `"null"` string artifacts.
+- **ENRICHMENT-02**: Expanded `update_if_placeholder` to recognize both `'{}'` and `'null'` as stale markers for retroactive cleanup. Guarded `response_content(body)` against `nil` returns.
+
 ## [0.6.0] - 2026-05-31
 
 ### Added
