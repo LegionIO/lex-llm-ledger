@@ -10,3 +10,4 @@
 Gemfile.lock
 .rspec_status
 audit_prompt_*.json
+docs/

@@ -112,7 +112,7 @@ module Legion
               end
             end
 
-            def find_or_create_request(db, conversation, latest_message, body) # rubocop:disable Metrics/AbcSize
+            def find_or_create_request(db, conversation, latest_message, body)
               request_id = request_ref(body)
               existing = db[:llm_message_inference_requests].where(request_ref: request_id).first
               return enrich_request!(db, existing, body, latest_message) if existing
@@ -140,7 +140,10 @@ module Legion
                                            status:                  'responded',
                                            context_message_count:   Array(body.dig(:request, :messages) || body[:messages]).size,
                                            request_capture_mode:    'full',
-                                           request_json:            phi_protect(json_dump(request_payload(body)), contains_phi?(body)),
+                                           request_json:            if request_payload(body)
+                                                                      phi_protect(json_dump(request_payload(body)),
+                                                                                  contains_phi?(body))
+                                                                    end,
                                            classification_level:    classification_level(body),
                                            cost_center:             billing(body)[:cost_center],
                                            budget_key:              billing(body)[:budget_id] || billing(body)[:budget_key],
@@ -194,15 +197,29 @@ module Legion
               end
             end
 
-            def find_or_create_response(db, request, response_message, body) # rubocop:disable Metrics/AbcSize
+            def find_or_create_response(db, request, response_message, body)
               response_uuid = stable_uuid(reference(body, :provider_response_ref) || "response:#{request_ref(body)}:#{body[:provider] || 'unknown'}")
               existing = db[:llm_message_inference_responses].where(uuid: response_uuid).first
+
+              # Fallback: if we couldn't find a response by UUID, check if a response
+              # already exists for this request (e.g., metering arrived first and created
+              # a response with a different UUID). Enrich it instead of creating a duplicate.
+              unless existing
+                existing = db[:llm_message_inference_responses]
+                           .where(message_inference_request_id: request[:id])
+                           .first
+                log.debug("[ledger] response fallback: found existing response id=#{existing[:id]} for request_id=#{request[:id]}") if existing
+              end
+
               if existing
                 enrich_response!(db, existing, response_message, body)
                 return existing
               end
 
+              vis_resp = visible_response(body)
+              think_resp = thinking_response(body)
               phi = contains_phi?(body)
+
               id = insert_with_savepoint(db, :llm_message_inference_responses, {
                                            uuid:                         response_uuid,
                                            message_inference_request_id: request[:id],
@@ -218,8 +235,8 @@ module Legion
                                            latency_ms:                   integer(body[:latency_ms]),
                                            wall_clock_ms:                integer(body[:wall_clock_ms]),
                                            response_capture_mode:        'full',
-                                           response_json:                phi_protect(json_dump(visible_response(body)), phi),
-                                           response_thinking_json:       phi_protect(json_dump(thinking_response(body)), phi),
+                                           response_json:                vis_resp ? phi_protect(json_dump(vis_resp), phi) : nil,
+                                           response_thinking_json:       think_resp ? phi_protect(json_dump(think_resp), phi) : nil,
                                            dispatch_path:                body[:dispatch_path] || body[:tier],
                                            error_category:               body[:error_category] || body.dig(:error, :category),
                                            error_code:                   body[:error_code] || body.dig(:error, :code),
@@ -254,11 +271,21 @@ module Legion
               update_if_missing(updates, existing, :dispatch_path, body[:dispatch_path] || body[:tier])
               update_if_missing(updates, existing, :identity_canonical_name, identity_canonical_name(body))
 
-              response_json = json_dump(visible_response(body))
-              update_if_placeholder(updates, existing, :response_json, response_json)
+              vis = visible_response(body)
+              if vis
+                response_json = json_dump(vis)
+                update_if_placeholder(updates, existing, :response_json, response_json)
+              elsif existing[:response_json].nil?
+                # Nothing to add, but also don't overwrite existing data with nil
+              end
 
-              thinking_json = json_dump(thinking_response(body))
-              update_if_placeholder(updates, existing, :response_thinking_json, thinking_json)
+              think = thinking_response(body)
+              if think
+                thinking_json = json_dump(think)
+                update_if_placeholder(updates, existing, :response_thinking_json, thinking_json)
+              elsif existing[:response_thinking_json].nil?
+                # Nothing to add
+              end
 
               return if updates.empty?
 
@@ -266,12 +293,27 @@ module Legion
               log.info("[ledger] enriched response id=#{existing[:id]} fields=#{updates.keys.join(',')}")
             end
 
+            # Core guard: never upsert a value that is nil, empty string, or empty JSON object.
+            # This prevents a leaner message (e.g., metering) from overwriting valid data
+            # written by a richer message (e.g., prompt audit).
+            def upsert_guard?(value)
+              return false if value.nil?
+              return false if value.is_a?(String) && value.strip.empty?
+              return false if value.to_s == '{}'
+
+              true
+            end
+
             def update_if_missing(updates, existing, key, value)
-              updates[key] = value if existing[key].nil? && present?(value)
+              updates[key] = value if existing[key].nil? && upsert_guard?(value)
             end
 
             def update_if_placeholder(updates, existing, key, value)
-              updates[key] = value if existing[key].to_s == '{}' && value != '{}'
+              return unless upsert_guard?(value)
+
+              existing_val = existing[key]
+              is_placeholder = ['{}', 'null'].include?(existing_val.to_s)
+              updates[key] = value if is_placeholder
             end
 
             def find_or_create_metric(db, request, response, body)
@@ -339,15 +381,19 @@ module Legion
               updates = {}
               update_if_missing(updates, existing, :latest_message_id, latest_message&.dig(:id))
               caller_refs = caller_identity_refs(db, body)
-              updates[:caller_identity_id] = caller_refs[:identity_id] if existing[:caller_identity_id].nil? && caller_refs[:identity_id]
-              updates[:caller_principal_id] = caller_refs[:principal_id] if existing[:caller_principal_id].nil? && caller_refs[:principal_id]
-              updates[:runtime_caller_type] = caller_type(body) if existing[:runtime_caller_type].nil? && caller_type(body)
+              update_if_missing(updates, existing, :caller_identity_id, caller_refs[:identity_id])
+              update_if_missing(updates, existing, :caller_principal_id, caller_refs[:principal_id])
+              update_if_missing(updates, existing, :runtime_caller_type, caller_type(body))
               update_if_missing(updates, existing, :runtime_caller_class, runtime_caller_class(body))
               update_if_missing(updates, existing, :runtime_caller_client, runtime_caller_client(body))
               update_if_missing(updates, existing, :identity_canonical_name, identity_canonical_name(body))
 
-              request_json = json_dump(request_payload(body))
-              updates[:request_json] = request_json if existing[:request_json].to_s == '{}' && request_json != '{}'
+              request_json = request_payload(body) ? json_dump(request_payload(body)) : nil
+              if request_json
+                update_if_placeholder(updates, existing, :request_json, request_json)
+              elsif existing[:request_json].nil?
+                # Nothing to add
+              end
 
               msg_count = Array(body.dig(:request, :messages) || body[:messages]).size
               updates[:context_message_count] = msg_count if existing[:context_message_count].to_i.zero? && msg_count.positive?
@@ -574,7 +620,7 @@ module Legion
             end
 
             def resolve_parent_request_id(db, body)
-              parent_ref = body[:parent_request_id] || body.dig(:context, :parent_request_id)
+              parent_ref = body[:parent_request_id] || body.dig(:context, :parent_request_id) || body.dig(:caller, :parent_request_ref)
               return nil unless present?(parent_ref)
 
               if parent_ref.is_a?(Integer)
@@ -630,7 +676,7 @@ module Legion
             end
 
             def request_payload(body)
-              body[:request] || body[:messages] || {}
+              body[:request] || body[:messages]
             end
 
             def request_content(body)
@@ -641,7 +687,9 @@ module Legion
             end
 
             def visible_response(body)
-              response = body[:response] || body[:response_content] || body[:content] || {}
+              response = body[:response] || body[:response_content] || body[:content]
+              return nil if response.nil? || (response.is_a?(Hash) && response.empty?)
+
               if response.is_a?(String)
                 clean, _thinking = extract_inline_thinking(response)
                 return { content: clean }
@@ -661,10 +709,10 @@ module Legion
               end
 
               content_str = body[:response_content] || body[:response] || body[:content]
-              return {} unless content_str.is_a?(String)
+              return nil unless content_str.is_a?(String)
 
               _clean, extracted = extract_inline_thinking(content_str)
-              extracted ? { content: extracted } : {}
+              extracted ? { content: extracted } : nil
             end
 
             def extract_inline_thinking(text)
@@ -677,7 +725,10 @@ module Legion
             end
 
             def response_content(body)
-              stringify_content(visible_response(body)[:content] || visible_response(body).dig(:message, :content))
+              vis = visible_response(body)
+              return nil unless vis
+
+              stringify_content(vis[:content] || vis.dig(:message, :content))
             end
 
             def finish_reason(body)
@@ -788,9 +839,7 @@ module Legion
             def resolve_context_tokens(body)
               raw = body[:tokens] || body[:audit] || body
               val = raw[:input_tokens] || raw[:input] || raw[:context_tokens] || raw[:prompt_tokens]
-              return nil unless present?(val)
-
-              val.to_i
+              present?(val) ? val.to_i : 0
             end
           end
         end
