@@ -3,6 +3,7 @@
 require_relative '../helpers/caller_identity'
 require_relative '../helpers/json'
 require_relative '../helpers/persistence_logging'
+require_relative '../writers/official_record_writer'
 
 module Legion
   module Extensions
@@ -66,6 +67,8 @@ module Legion
                 worker_id:               runtime[:worker_id] || runtime[:worker],
                 node_id:                 runtime[:node_id] || runtime[:host_id],
                 identity_canonical_name: extract_canonical_name(body, headers),
+                identity_principal_id:   extract_identity_principal_id(body, headers),
+                identity_id:             extract_identity_id(body, headers),
                 offering_json:           json_dump(offering),
                 runtime_json:            json_dump(runtime),
                 capacity_json:           json_dump(body[:capacity] || {}),
@@ -87,6 +90,44 @@ module Legion
               return nil unless raw && !raw.to_s.empty? # rubocop:disable Legion/Extension/RunnerReturnHash
 
               raw.to_s
+            end
+
+            # Resolve identity_principal_id from AMQP headers or body.
+            # Uses OfficialRecordWriter.identity_tables_available? to check if FK resolution is possible.
+            def extract_identity_principal_id(body, headers)
+              raw = headers['x-legion-identity'] ||
+                    body.dig(:identity, :identity) ||
+                    body.dig(:identity, :canonical_name)
+              return nil unless raw && !raw.to_s.empty? # rubocop:disable Legion/Extension/RunnerReturnHash
+
+              db = ::Legion::Data.connection
+              return nil unless Writers::OfficialRecordWriter.identity_tables_available?(db) # rubocop:disable Legion/Extension/RunnerReturnHash
+
+              body_with_identity = body.merge(caller_identity: raw)
+              refs = Writers::OfficialRecordWriter.resolve_identity(db, body_with_identity)
+              refs[:principal_id]
+            rescue StandardError => e
+              handle_exception(e, level: :warn, handled: true, operation: 'write_registry_availability_record.identity_principal')
+              nil
+            end
+
+            # Resolve identity_id from AMQP headers or body.
+            # Uses OfficialRecordWriter.identity_tables_available? to check if FK resolution is possible.
+            def extract_identity_id(body, headers)
+              raw = headers['x-legion-identity'] ||
+                    body.dig(:identity, :identity) ||
+                    body.dig(:identity, :canonical_name)
+              return nil unless raw && !raw.to_s.empty? # rubocop:disable Legion/Extension/RunnerReturnHash
+
+              db = ::Legion::Data.connection
+              return nil unless Writers::OfficialRecordWriter.identity_tables_available?(db) # rubocop:disable Legion/Extension/RunnerReturnHash
+
+              body_with_identity = body.merge(caller_identity: raw)
+              refs = Writers::OfficialRecordWriter.resolve_identity(db, body_with_identity)
+              refs[:identity_id]
+            rescue StandardError => e
+              handle_exception(e, level: :warn, handled: true, operation: 'write_registry_availability_record.identity')
+              nil
             end
 
             def lane_key(lane)
