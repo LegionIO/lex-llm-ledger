@@ -17,17 +17,15 @@ module Legion
             # Persist route attempt details into llm_route_attempts table.
             # Called from write_prompt/write_metering after the response row exists.
             #
-            # Maps emitter keys to existing columns:
-            #   provider       -> provider
-            #   instance       -> MISSING COLUMN (noted in B2 report)
-            #   model          -> model_key
-            #   operation      -> MISSING COLUMN (noted in B2 report)
-            #   dispatch_path  -> MISSING COLUMN (noted in B2 report)
-            #   status         -> status
-            #   failure_reason -> failure_reason
-            #   idempotency_key -> MISSING COLUMN (noted in B2 report)
-            #
-            # Missing columns require new legion-data migrations (out of scope).
+            # Maps emitter keys to table columns:
+            #   provider        -> provider
+            #   instance        -> route_target
+            #   model           -> model_key
+            #   operation       -> operation
+            #   dispatch_path   -> dispatch_path
+            #   status          -> status
+            #   failure_reason  -> failure_reason
+            #   idempotency_key -> idempotency_key
             def write_route_attempts(db, request, response, body)
               attempts = Array(body[:route_attempt_details])
               return if attempts.empty?
@@ -57,6 +55,9 @@ module Legion
                       status:                        (attempt[:status] || 'success').to_s,
                       failure_reason:                attempt[:failure_reason],
                       latency_ms:                    (attempt[:latency_ms] || 0).to_i,
+                      operation:                     attempt[:operation],
+                      dispatch_path:                 attempt[:dispatch_path],
+                      idempotency_key:               attempt[:idempotency_key],
                       started_at:                    attempt[:started_at],
                       ended_at:                      attempt[:ended_at],
                       identity_principal_id:         resolve_identity_principal_id(db, body),
