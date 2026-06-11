@@ -74,14 +74,14 @@ module Legion
             end
 
             def resolve_identity_principal_id(db, body)
-              Helpers::CallerIdentity.resolve_principal_id(db, body)
+              OfficialRecordWriter.caller_identity_refs(db, body)[:principal_id]
             rescue StandardError => e
               handle_exception(e, level: :warn, handled: true, operation: 'route_attempt_writer.identity_principal')
               nil
             end
 
             def resolve_identity_id(db, body)
-              Helpers::CallerIdentity.resolve_identity_id(db, body)
+              OfficialRecordWriter.caller_identity_refs(db, body)[:identity_id]
             rescue StandardError => e
               handle_exception(e, level: :warn, handled: true, operation: 'route_attempt_writer.identity')
               nil
