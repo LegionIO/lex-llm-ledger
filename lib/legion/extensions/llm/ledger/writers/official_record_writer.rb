@@ -6,6 +6,7 @@ require 'legion/logging'
 require 'legion/extensions/llm/responses/thinking_extractor'
 require_relative '../helpers/json'
 require_relative '../helpers/persistence_logging'
+require_relative 'official_route_attempt_writer'
 
 module Legion
   module Extensions
@@ -30,6 +31,7 @@ module Legion
                 response = find_or_create_response(db, request, response_message, body)
                 link_response_message!(db, response_message, response)
                 metric = find_or_create_metric(db, request, response, body)
+                OfficialRouteAttemptWriter.write_route_attempts(db, request, response, body)
                 result = { result: :ok, request_id: request[:id], response_id: response[:id], metric_id: metric[:id] }
               end
 
@@ -46,6 +48,7 @@ module Legion
                 request = find_or_create_request(db, conversation, nil, body)
                 response = find_or_create_response(db, request, nil, body)
                 metric = find_or_create_metric(db, request, response, body)
+                OfficialRouteAttemptWriter.write_route_attempts(db, request, response, body)
                 result = { result: :ok, request_id: request[:id], response_id: response[:id], metric_id: metric[:id] }
               end
 
@@ -149,7 +152,7 @@ module Legion
                                            budget_key:              billing(body)[:budget_id] || billing(body)[:budget_key],
                                            injected_tool_count:     Array(body.dig(:audit, :injected_tools) || body[:injected_tools]).size,
                                            context_tokens:          resolve_context_tokens(body),
-                                           request_content_hash:    compute_content_hash(body.dig(:request, :content) || body.dig(:audit, :request_content)),
+                                           request_content_hash:    resolve_request_content_hash(body),
                                            curation_strategy:       body[:curation_strategy] || body.dig(:audit, :curation_strategy),
                                            tool_policy:             body[:tool_policy] || body.dig(:audit, :tool_policy),
                                            requested_at:            recorded_at(body),
@@ -241,7 +244,7 @@ module Legion
                                            error_category:               body[:error_category] || body.dig(:error, :category),
                                            error_code:                   body[:error_code] || body.dig(:error, :code),
                                            error_message:                body[:error_message] || body.dig(:error, :message),
-                                           response_content_hash:        compute_content_hash(body[:response_content] || body.dig(:audit, :response_content)),
+                                           response_content_hash:        resolve_response_content_hash(body),
                                            route_attempts:               (body[:route_attempts] || body.dig(:audit, :route_attempts)).to_i,
                                            escalation_chain_ref:         body[:escalation_chain_ref],
                                            identity_principal_id:        caller_identity_refs(db, body)[:principal_id],
@@ -270,6 +273,7 @@ module Legion
               update_if_missing(updates, existing, :finish_reason, finish_reason(body))
               update_if_missing(updates, existing, :dispatch_path, body[:dispatch_path] || body[:tier])
               update_if_missing(updates, existing, :identity_canonical_name, identity_canonical_name(body))
+              update_if_missing(updates, existing, :response_content_hash, resolve_response_content_hash(body))
 
               vis = visible_response(body)
               if vis
@@ -387,6 +391,7 @@ module Legion
               update_if_missing(updates, existing, :runtime_caller_class, runtime_caller_class(body))
               update_if_missing(updates, existing, :runtime_caller_client, runtime_caller_client(body))
               update_if_missing(updates, existing, :identity_canonical_name, identity_canonical_name(body))
+              update_if_missing(updates, existing, :request_content_hash, resolve_request_content_hash(body))
 
               request_json = request_payload(body) ? json_dump(request_payload(body)) : nil
               if request_json
@@ -834,6 +839,22 @@ module Legion
               return nil if content.nil? || content.to_s.empty?
 
               Digest::SHA256.hexdigest(json_dump(content))[0..31]
+            end
+
+            # Prefer precomputed hash from emitter (A4: hash ships instead of raw content).
+            # Falls back to computing from raw content for backward compatibility.
+            def resolve_request_content_hash(body)
+              return body[:request_content_hash] if present?(body[:request_content_hash])
+
+              compute_content_hash(body.dig(:request, :content) || body.dig(:audit, :request_content))
+            end
+
+            # Prefer precomputed hash from emitter (A4: hash ships instead of raw content).
+            # Falls back to computing from raw content for backward compatibility.
+            def resolve_response_content_hash(body)
+              return body[:response_content_hash] if present?(body[:response_content_hash])
+
+              compute_content_hash(body[:response_content] || body.dig(:audit, :response_content))
             end
 
             def resolve_context_tokens(body)

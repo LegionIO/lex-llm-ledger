@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.7.1] - 2026-06-11
+
+### Fixed
+- **IDENTITY-07**: `OfficialRouteAttemptWriter` called non-existent `CallerIdentity.resolve_principal_id` and `CallerIdentity.resolve_identity_id`. Delegated to `OfficialRecordWriter.caller_identity_refs` which already implements full identity resolution with header fallbacks and DB lookups.
+
 ## [0.7.0] - 2026-06-09
 
 ### Fixed
