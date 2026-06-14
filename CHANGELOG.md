@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2] - 2026-06-13
+
+### Changed
+- **Gemfile cleanup** — Remove local path overrides; dependencies resolve from gemspec via rubygems.
+- **Dependency bump** — Require `lex-llm >= 0.5.0` for canonical types support.
+- 135 examples, 0 failures; 83 files, 0 rubocop offenses.
+
 ## [0.7.1] - 2026-06-11
 
 ### Fixed
