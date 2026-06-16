@@ -12,10 +12,10 @@ module Legion
 
             module_function
 
-            def dump(value)
+            def dump(value, pretty: false)
               return 'null' if value.nil?
 
-              json_dump(value)
+              json_dump(value, pretty:)
             end
 
             def load(value, symbolize_keys: true)

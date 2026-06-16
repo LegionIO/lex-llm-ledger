@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.4] - 2026-06-16
+
+### Added
+- **Context token accounting persistence** — `OfficialRecordWriter` maps all context accounting fields from `legion-llm` payloads to `llm_message_inference_metrics` columns. `llm_message_inference_metrics` is the canonical source of truth for all pipeline context token metrics.
+- **Context accounting event rows** — Detailed per-component accounting events persisted to `llm_context_accounting_events` as drill-down evidence (not a second source of token truth).
+- **Prompt/metering ordering enrichment** — When a richer accounting payload arrives via a later event, the existing metric row is enriched using ranked status precedence (`missing` < `profile_skipped` < `partial` < `estimated` < `provider_reconciled`).
+
+## [0.7.3] - 2026-06-15
+
+### Changed
+- Persist official inference `request_json`, `response_json`, and `response_thinking_json` with pretty formatting when stored in text columns, while preserving minified JSON for operational fields and hashes.
+
 ## [0.7.2] - 2026-06-13
 
 ### Changed
