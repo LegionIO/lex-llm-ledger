@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.7.5] - 2026-06-16
+
+### Changed
+- Dependency updates and code quality improvements.
+
 ## [0.7.4] - 2026-06-16
 
 ### Added
