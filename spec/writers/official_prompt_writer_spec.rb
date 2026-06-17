@@ -57,6 +57,23 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Writers::OfficialPromptWriter do
     expect(assistant_message[:message_inference_response_id]).to eq(response[:id])
   end
 
+  it 'stores full request and response JSON in a readable pretty format' do
+    described_class.write(payload)
+
+    request = Legion::Data.connection[:llm_message_inference_requests].first
+    response = Legion::Data.connection[:llm_message_inference_responses].first
+
+    expect(request[:request_json]).to include("\n  ")
+    expect(response[:response_json]).to include("\n  ")
+    expect(response[:response_thinking_json]).to include("\n  ")
+
+    expect(JSON.parse(request[:request_json])).to eq(
+      'messages' => [{ 'role' => 'user', 'content' => 'Hello?' }]
+    )
+    expect(JSON.parse(response[:response_json])).to eq('content' => 'Hello')
+    expect(JSON.parse(response[:response_thinking_json])).to eq('content' => 'hidden')
+  end
+
   it 'is idempotent for the same request and response references' do
     described_class.write(payload)
     result = described_class.write(payload)

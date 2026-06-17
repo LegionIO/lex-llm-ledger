@@ -144,7 +144,7 @@ module Legion
                                            context_message_count:   Array(body.dig(:request, :messages) || body[:messages]).size,
                                            request_capture_mode:    'full',
                                            request_json:            if request_payload(body)
-                                                                      phi_protect(json_dump(request_payload(body)),
+                                                                      phi_protect(storage_json_dump(request_payload(body)),
                                                                                   contains_phi?(body))
                                                                     end,
                                            classification_level:    classification_level(body),
@@ -238,8 +238,8 @@ module Legion
                                            latency_ms:                   integer(body[:latency_ms]),
                                            wall_clock_ms:                integer(body[:wall_clock_ms]),
                                            response_capture_mode:        'full',
-                                           response_json:                vis_resp ? phi_protect(json_dump(vis_resp), phi) : nil,
-                                           response_thinking_json:       think_resp ? phi_protect(json_dump(think_resp), phi) : nil,
+                                           response_json:                vis_resp ? phi_protect(storage_json_dump(vis_resp), phi) : nil,
+                                           response_thinking_json:       think_resp ? phi_protect(storage_json_dump(think_resp), phi) : nil,
                                            dispatch_path:                body[:dispatch_path] || body[:tier],
                                            error_category:               body[:error_category] || body.dig(:error, :category),
                                            error_code:                   body[:error_code] || body.dig(:error, :code),
@@ -277,7 +277,7 @@ module Legion
 
               vis = visible_response(body)
               if vis
-                response_json = json_dump(vis)
+                response_json = storage_json_dump(vis)
                 update_if_placeholder(updates, existing, :response_json, response_json)
               elsif existing[:response_json].nil?
                 # Nothing to add, but also don't overwrite existing data with nil
@@ -285,7 +285,7 @@ module Legion
 
               think = thinking_response(body)
               if think
-                thinking_json = json_dump(think)
+                thinking_json = storage_json_dump(think)
                 update_if_placeholder(updates, existing, :response_thinking_json, thinking_json)
               elsif existing[:response_thinking_json].nil?
                 # Nothing to add
@@ -320,42 +320,188 @@ module Legion
               updates[key] = value if is_placeholder
             end
 
+            CONTEXT_ACCOUNTING_STATUS_RANK = {
+              'missing'             => 0,
+              'profile_skipped'     => 1,
+              'partial'             => 2,
+              'estimated'           => 3,
+              'provider_reconciled' => 4
+            }.freeze
+
             def find_or_create_metric(db, request, response, body)
               metric_uuid = stable_uuid(reference(body, :metric_id, :metric_ref) || "metric:#{request_ref(body)}")
               existing = db[:llm_message_inference_metrics].where(uuid: metric_uuid).first
-              return existing if existing
+              if existing
+                enrich_metric_context_accounting!(db, existing, body)
+                return existing
+              end
 
               token_values = tokens(body)
-              id = insert_with_savepoint(db, :llm_message_inference_metrics, {
-                                           uuid:                          metric_uuid,
-                                           message_inference_request_id:  request[:id],
-                                           message_inference_response_id: response[:id],
-                                           provider:                      provider(body),
-                                           model_key:                     model_id(body),
-                                           tier:                          tier(body),
-                                           input_tokens:                  token_values[:input_tokens],
-                                           output_tokens:                 token_values[:output_tokens],
-                                           thinking_tokens:               token_values[:thinking_tokens],
-                                           total_tokens:                  token_values[:total_tokens],
-                                           latency_ms:                    integer(body[:latency_ms]),
-                                           wall_clock_ms:                 integer(body[:wall_clock_ms]),
-                                           cost_usd:                      cost_usd(body),
-                                           currency:                      body[:currency] || 'USD',
-                                           cost_center:                   billing(body)[:cost_center],
-                                           budget_key:                    billing(body)[:budget_id] || billing(body)[:budget_key],
-                                           identity_principal_id:         caller_identity_refs(db, body)[:principal_id],
-                                           identity_id:                   caller_identity_refs(db, body)[:identity_id],
-                                           identity_canonical_name:       identity_canonical_name(body),
-                                           recorded_at:                   recorded_at(body),
-                                           inserted_at:                   Time.now.utc
-                                         }, operation: 'official_record_writer.inference_metric')
-              db[:llm_message_inference_metrics][id: id]
+              attrs = {
+                uuid:                          metric_uuid,
+                message_inference_request_id:  request[:id],
+                message_inference_response_id: response[:id],
+                provider:                      provider(body),
+                model_key:                     model_id(body),
+                tier:                          tier(body),
+                input_tokens:                  token_values[:input_tokens],
+                output_tokens:                 token_values[:output_tokens],
+                thinking_tokens:               token_values[:thinking_tokens],
+                total_tokens:                  token_values[:total_tokens],
+                latency_ms:                    integer(body[:latency_ms]),
+                wall_clock_ms:                 integer(body[:wall_clock_ms]),
+                cost_usd:                      cost_usd(body),
+                currency:                      body[:currency] || 'USD',
+                cost_center:                   billing(body)[:cost_center],
+                budget_key:                    billing(body)[:budget_id] || billing(body)[:budget_key],
+                identity_principal_id:         caller_identity_refs(db, body)[:principal_id],
+                identity_id:                   caller_identity_refs(db, body)[:identity_id],
+                identity_canonical_name:       identity_canonical_name(body),
+                recorded_at:                   recorded_at(body),
+                inserted_at:                   Time.now.utc
+              }.merge(context_accounting_metric_columns(body))
+
+              id = insert_with_savepoint(db, :llm_message_inference_metrics, attrs,
+                                         operation: 'official_record_writer.inference_metric')
+              metric = db[:llm_message_inference_metrics][id: id]
+              write_context_accounting_events(db, request, response, metric, body)
+              metric
             rescue Sequel::UniqueConstraintViolation => e
               log.debug("[ledger] metric collision resolved uuid=#{metric_uuid} error=#{e.class}")
               existing = db[:llm_message_inference_metrics].where(uuid: metric_uuid).first
-              return existing if existing
+              if existing
+                enrich_metric_context_accounting!(db, existing, body)
+                return existing
+              end
 
               raise
+            end
+
+            def context_accounting_metric_columns(body)
+              accounting = context_accounting(body)
+              token_accounting = context_accounting_tokens(body)
+              count_accounting = context_accounting_counts(body)
+              {
+                request_message_estimated_tokens:      integer(token_accounting[:request_message_estimated_tokens]),
+                loaded_history_estimated_tokens:       integer(token_accounting[:loaded_history_estimated_tokens]),
+                curated_history_estimated_tokens:      integer(token_accounting[:curated_history_estimated_tokens]),
+                curation_saved_estimated_tokens:       integer(token_accounting[:curation_saved_estimated_tokens]),
+                stripped_thinking_estimated_tokens:    integer(token_accounting[:stripped_thinking_estimated_tokens]),
+                archived_history_estimated_tokens:     integer(token_accounting[:archived_history_estimated_tokens]),
+                archive_saved_estimated_tokens:        integer(token_accounting[:archive_saved_estimated_tokens]),
+                context_window_saved_estimated_tokens: integer(token_accounting[:context_window_saved_estimated_tokens]),
+                rag_injected_estimated_tokens:         integer(token_accounting[:rag_injected_estimated_tokens]),
+                system_prompt_estimated_tokens:        integer(token_accounting[:system_prompt_estimated_tokens]),
+                baseline_system_estimated_tokens:      integer(token_accounting[:baseline_system_estimated_tokens]),
+                tool_definition_estimated_tokens:      integer(token_accounting[:tool_definition_estimated_tokens]),
+                final_context_estimated_tokens:        integer(token_accounting[:final_context_estimated_tokens]),
+                loaded_history_message_count:          integer(count_accounting[:loaded_history_message_count]),
+                curated_history_message_count:         integer(count_accounting[:curated_history_message_count]),
+                archived_history_message_count:        integer(count_accounting[:archived_history_message_count]),
+                stripped_thinking_message_count:       integer(count_accounting[:stripped_thinking_message_count]),
+                context_window_message_count_before:   integer(count_accounting[:context_window_message_count_before]),
+                context_window_message_count_after:    integer(count_accounting[:context_window_message_count_after]),
+                rag_entry_count:                       integer(count_accounting[:rag_entry_count]),
+                tool_definition_count:                 integer(count_accounting[:tool_definition_count]),
+                context_accounting_status:             (accounting[:status] || 'missing').to_s,
+                context_accounting_json:               accounting.empty? ? nil : storage_json_dump(accounting)
+              }
+            end
+
+            def context_accounting(body)
+              raw = body[:context_accounting] || body.dig(:audit, :context_accounting)
+              raw.is_a?(Hash) ? raw : {}
+            end
+
+            def context_accounting_tokens(body)
+              context_accounting(body)[:tokens] || {}
+            end
+
+            def context_accounting_counts(body)
+              context_accounting(body)[:counts] || {}
+            end
+
+            def enrich_metric_context_accounting!(db, existing, body)
+              incoming = context_accounting(body)
+              return if incoming.empty?
+
+              incoming_status = (incoming[:status] || 'missing').to_s
+              existing_status = (existing[:context_accounting_status] || 'missing').to_s
+
+              return unless richer_context_accounting?(existing_status, incoming_status)
+
+              token_accounting = incoming[:tokens] || {}
+              count_accounting = incoming[:counts] || {}
+              updates = {
+                request_message_estimated_tokens:      integer(token_accounting[:request_message_estimated_tokens]),
+                loaded_history_estimated_tokens:       integer(token_accounting[:loaded_history_estimated_tokens]),
+                curated_history_estimated_tokens:      integer(token_accounting[:curated_history_estimated_tokens]),
+                curation_saved_estimated_tokens:       integer(token_accounting[:curation_saved_estimated_tokens]),
+                stripped_thinking_estimated_tokens:    integer(token_accounting[:stripped_thinking_estimated_tokens]),
+                archived_history_estimated_tokens:     integer(token_accounting[:archived_history_estimated_tokens]),
+                archive_saved_estimated_tokens:        integer(token_accounting[:archive_saved_estimated_tokens]),
+                context_window_saved_estimated_tokens: integer(token_accounting[:context_window_saved_estimated_tokens]),
+                rag_injected_estimated_tokens:         integer(token_accounting[:rag_injected_estimated_tokens]),
+                system_prompt_estimated_tokens:        integer(token_accounting[:system_prompt_estimated_tokens]),
+                baseline_system_estimated_tokens:      integer(token_accounting[:baseline_system_estimated_tokens]),
+                tool_definition_estimated_tokens:      integer(token_accounting[:tool_definition_estimated_tokens]),
+                final_context_estimated_tokens:        integer(token_accounting[:final_context_estimated_tokens]),
+                loaded_history_message_count:          integer(count_accounting[:loaded_history_message_count]),
+                curated_history_message_count:         integer(count_accounting[:curated_history_message_count]),
+                archived_history_message_count:        integer(count_accounting[:archived_history_message_count]),
+                stripped_thinking_message_count:       integer(count_accounting[:stripped_thinking_message_count]),
+                context_window_message_count_before:   integer(count_accounting[:context_window_message_count_before]),
+                context_window_message_count_after:    integer(count_accounting[:context_window_message_count_after]),
+                rag_entry_count:                       integer(count_accounting[:rag_entry_count]),
+                tool_definition_count:                 integer(count_accounting[:tool_definition_count]),
+                context_accounting_status:             incoming_status,
+                context_accounting_json:               storage_json_dump(incoming)
+              }
+              db[:llm_message_inference_metrics].where(id: existing[:id]).update(updates)
+              log.info("[ledger] enriched metric context_accounting id=#{existing[:id]} status=#{incoming_status}")
+            rescue StandardError => e
+              handle_exception(e, level: :warn, handled: true, operation: 'official_record_writer.enrich_metric_context_accounting')
+            end
+
+            def richer_context_accounting?(existing_status, incoming_status)
+              CONTEXT_ACCOUNTING_STATUS_RANK.fetch(incoming_status, 0) >=
+                CONTEXT_ACCOUNTING_STATUS_RANK.fetch(existing_status, 0)
+            end
+
+            def write_context_accounting_events(db, request, response, metric, body)
+              accounting = context_accounting(body)
+              return unless accounting.is_a?(Hash)
+
+              events = Array(accounting[:events])
+              return if events.empty?
+
+              req_ref = request[:request_ref]
+              events.each_with_index do |event, index|
+                normalized = event.transform_keys { |key| key.respond_to?(:to_sym) ? key.to_sym : key }
+                uuid = stable_uuid("context-accounting:#{req_ref}:#{index}:#{normalized[:event_type]}:#{normalized[:component]}")
+                next if db[:llm_context_accounting_events].where(uuid: uuid).first
+
+                insert_with_savepoint(db, :llm_context_accounting_events, {
+                                        uuid:                          uuid,
+                                        message_inference_request_id:  request[:id],
+                                        message_inference_response_id: response&.dig(:id),
+                                        message_inference_metric_id:   metric&.dig(:id),
+                                        conversation_ref:              body[:conversation_id].to_s,
+                                        request_ref:                   req_ref,
+                                        event_type:                    normalized[:event_type].to_s,
+                                        component:                     normalized[:component].to_s,
+                                        estimated_tokens_before:       normalized[:estimated_tokens_before].to_i,
+                                        estimated_tokens_after:        normalized[:estimated_tokens_after].to_i,
+                                        estimated_tokens_delta:        normalized[:estimated_tokens_delta].to_i,
+                                        message_count_before:          normalized[:message_count_before].to_i,
+                                        message_count_after:           normalized[:message_count_after].to_i,
+                                        metadata_json:                 normalized[:metadata] ? json_dump(normalized[:metadata]) : nil,
+                                        recorded_at:                   recorded_at(body),
+                                        inserted_at:                   Time.now.utc
+                                      }, operation: 'official_record_writer.context_accounting_event')
+              end
+            rescue StandardError => e
+              handle_exception(e, level: :warn, handled: true, operation: 'official_record_writer.write_context_accounting_events')
             end
 
             def insert_row(db, table, attributes, operation:)
@@ -393,7 +539,7 @@ module Legion
               update_if_missing(updates, existing, :identity_canonical_name, identity_canonical_name(body))
               update_if_missing(updates, existing, :request_content_hash, resolve_request_content_hash(body))
 
-              request_json = request_payload(body) ? json_dump(request_payload(body)) : nil
+              request_json = request_payload(body) ? storage_json_dump(request_payload(body)) : nil
               if request_json
                 update_if_placeholder(updates, existing, :request_json, request_json)
               elsif existing[:request_json].nil?
@@ -814,6 +960,10 @@ module Legion
 
             def json_dump(value)
               Helpers::Json.dump(value)
+            end
+
+            def storage_json_dump(value)
+              Helpers::Json.dump(value, pretty: true)
             end
 
             def deep_symbolize(value)

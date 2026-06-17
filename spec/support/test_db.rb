@@ -27,6 +27,7 @@ module TestDb
     Sequel::Migrator.run(db, legion_data_migration_dir)
     ensure_identity_columns!(db)
     ensure_audit_columns!(db)
+    ensure_context_accounting_columns!(db)
     migration_dir = File.expand_path('../../lib/legion/extensions/llm/ledger/data/migrations', __dir__)
     Sequel::Migrator.run(db, migration_dir, table: :schema_migrations_lex_llm_ledger)
     db
@@ -71,6 +72,57 @@ module TestDb
     db.alter_table(table) do
       add_column :runtime_caller_class, String, size: 255, null: true unless columns.include?(:runtime_caller_class)
       add_column :runtime_caller_client, String, size: 255, null: true unless columns.include?(:runtime_caller_client)
+    end
+  end
+
+  # Safety net: context accounting columns from migration 135 may not be on
+  # disk if running against an older legion-data checkout.
+  def ensure_context_accounting_columns!(db)
+    table = :llm_message_inference_metrics
+    return unless db.table_exists?(table)
+
+    existing = db[table].columns
+    context_cols = %i[
+      request_message_estimated_tokens loaded_history_estimated_tokens
+      curated_history_estimated_tokens curation_saved_estimated_tokens
+      stripped_thinking_estimated_tokens archived_history_estimated_tokens
+      archive_saved_estimated_tokens context_window_saved_estimated_tokens
+      rag_injected_estimated_tokens system_prompt_estimated_tokens
+      baseline_system_estimated_tokens tool_definition_estimated_tokens
+      final_context_estimated_tokens loaded_history_message_count
+      curated_history_message_count archived_history_message_count
+      stripped_thinking_message_count context_window_message_count_before
+      context_window_message_count_after rag_entry_count tool_definition_count
+    ]
+
+    db.alter_table(table) do
+      context_cols.each do |col|
+        add_column(col, Integer, null: false, default: 0) unless existing.include?(col)
+      end
+      add_column(:context_accounting_status, String, size: 64, null: false, default: 'missing') unless existing.include?(:context_accounting_status)
+      add_column(:context_accounting_json, String, text: true) unless existing.include?(:context_accounting_json)
+    end
+
+    return if db.table_exists?(:llm_context_accounting_events)
+
+    db.create_table(:llm_context_accounting_events) do
+      primary_key :id
+      String :uuid, size: 36, null: false, unique: true
+      foreign_key :message_inference_request_id, :llm_message_inference_requests, null: false, on_delete: :cascade
+      foreign_key :message_inference_response_id, :llm_message_inference_responses, null: true, on_delete: :set_null
+      foreign_key :message_inference_metric_id, :llm_message_inference_metrics, null: true, on_delete: :set_null
+      String :conversation_ref, size: 128
+      String :request_ref, size: 128, null: false
+      String :event_type, size: 64, null: false
+      String :component, size: 64, null: false
+      Integer :estimated_tokens_before, null: false, default: 0
+      Integer :estimated_tokens_after, null: false, default: 0
+      Integer :estimated_tokens_delta, null: false, default: 0
+      Integer :message_count_before, null: false, default: 0
+      Integer :message_count_after, null: false, default: 0
+      String :metadata_json, text: true
+      DateTime :recorded_at
+      DateTime :inserted_at, null: false, default: Sequel::CURRENT_TIMESTAMP
     end
   end
 
