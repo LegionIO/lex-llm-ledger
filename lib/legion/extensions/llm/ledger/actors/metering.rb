@@ -12,6 +12,7 @@ module Legion
             include Helpers::SubscriptionActor
 
             prefetch 4
+            consumers 4
 
             def runner_class = Legion::Extensions::Llm::Ledger::Runners::Metering
 
