@@ -36,6 +36,11 @@ module Legion
       class Subscription
         include Legion::Logging::Helper
 
+        def self.consumers(count = nil)
+          @consumers = count unless count.nil?
+          @consumers
+        end
+
         def self.prefetch(count = nil)
           @prefetch = count unless count.nil?
           @prefetch

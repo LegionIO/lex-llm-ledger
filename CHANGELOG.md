@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.7.6] - 2026-06-20
+
+### Fixed
+- Mirror the `Subscription` DSL `consumers` accessor in the lightweight test harness so the metering actor loads under spec without depending on the full Legion runtime.
+
 ## [0.7.5] - 2026-06-16
 
 ### Changed
