@@ -230,4 +230,17 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Tools do
       end.to raise_error(Legion::Extensions::Llm::Ledger::Helpers::DecryptionFailed, /missing iv/)
     end
   end
+
+  # PRESERVATION CONTRACT — verify runtime invariants before the runner rewrite.
+  describe 'preservation contract' do
+    context 'kwargs contract' do
+      before { seed_inference_response }
+
+      it 'accepts kwargs entrypoints for tool writes' do
+        result = described_class.write_tool_record(payload: decrypted_body, metadata: metadata, ignored: 'ok')
+        expect(result[:result]).to eq(:ok)
+        expect(db[:llm_tool_calls].count).to eq(1)
+      end
+    end
+  end
 end

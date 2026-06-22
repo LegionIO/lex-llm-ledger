@@ -170,4 +170,74 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Prompts do
       end
     end
   end
+
+  # PRESERVATION CONTRACT — verify runtime invariants before the runner rewrite.
+  # Each spec must continue to pass after persistence is extracted into helpers.
+  describe 'preservation contract' do
+    let(:request_id) { 'req-preserve-prompt' }
+
+    let(:prompt_payload) do
+      {
+        message_context:     { conversation_id: 'conv-123', request_id: request_id },
+        routing:             { provider: 'ollama', model: 'qwen3.5:27b', tier: 'fleet', instance: 'local' },
+        tokens:              { input: 42, output: 28, total: 70 },
+        request:             { messages: [{ role: 'user', content: 'Hello' }] },
+        response:            { message: { role: 'assistant', content: 'Hi' } }
+      }
+    end
+
+    let(:prompt_metadata) do
+      {
+        properties: { message_id: 'audit_prompt_preserve', correlation_id: request_id, content_encoding: 'identity' },
+        headers:    {
+          'x-legion-retention'        => 'default',
+          'x-legion-contains-phi'     => 'false',
+          'x-legion-classification'   => 'internal',
+          'x-legion-llm-request-type' => 'chat'
+        }
+      }
+    end
+
+    context 'escalation-first ordering' do
+      it 'preserves runtime_caller_class from the first writer' do
+        escalation_payload = prompt_payload.merge(
+          caller: { class: 'Legion::Llm::Inference::Executor::Escalation' }
+        )
+        executor_payload = prompt_payload.merge(
+          caller: { class: 'Legion::Llm::Inference::Executor' }
+        )
+
+        described_class.write_prompt_record(escalation_payload, prompt_metadata)
+        described_class.write_prompt_record(executor_payload, prompt_metadata)
+
+        request = Legion::Data::Models::LLM::MessageInferenceRequest.lookup(request_id)
+        expect(request[:runtime_caller_class]).to eq('Legion::Llm::Inference::Executor::Escalation')
+      end
+    end
+
+    context 'kwargs contract' do
+      it 'accepts kwargs entrypoints for prompt writes' do
+        result = described_class.write_prompt_record(payload: prompt_payload, metadata: prompt_metadata, ignored: 'ok')
+        expect(result[:result]).to eq(:ok)
+      end
+    end
+
+    context 'conversation dedup' do
+      it 'does not merge mixed conv_* vs UUID conversation formats' do
+        conv_a = prompt_payload.merge(
+          message_context: { conversation_id: 'conv_23b2e22115f141b5', request_id: 'req-conv-a' }
+        )
+        conv_b = prompt_payload.merge(
+          message_context: { conversation_id: '7bf0dcda-c2c3-4e3a-92af-665af3292c56', request_id: 'req-conv-b' }
+        )
+        meta_a = prompt_metadata.merge(properties: { message_id: 'prompt-a', correlation_id: 'req-conv-a' })
+        meta_b = prompt_metadata.merge(properties: { message_id: 'prompt-b', correlation_id: 'req-conv-b' })
+
+        described_class.write_prompt_record(conv_a, meta_a)
+        described_class.write_prompt_record(conv_b, meta_b)
+
+        expect(Legion::Data::Models::LLM::Conversation.count).to eq(2)
+      end
+    end
+  end
 end

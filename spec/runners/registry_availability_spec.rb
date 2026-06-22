@@ -131,4 +131,14 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::RegistryAvailability do
       )
     end
   end
+
+  # PRESERVATION CONTRACT — verify runtime invariants before the runner rewrite.
+  describe 'preservation contract' do
+    context 'kwargs contract' do
+      it 'accepts kwargs entrypoints for registry writes' do
+        result = described_class.write_registry_availability_record(payload: payload, metadata: metadata, ignored: 'ok')
+        expect(result[:result]).to eq(:ok)
+      end
+    end
+  end
 end

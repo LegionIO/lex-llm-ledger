@@ -144,4 +144,179 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Metering do
       expect(official_payload[:caller_type]).to eq('human')
     end
   end
+
+  # PRESERVATION CONTRACT — verify runtime invariants before the runner rewrite.
+  # Each spec must continue to pass after persistence is extracted into helpers.
+  describe 'preservation contract' do
+    # All assertions use Legion::Data::Models::LLM::X directly.
+
+    let(:metering_metadata) do
+      { properties: { message_id: 'meter_abc123', correlation_id: 'req-ordered' } }
+    end
+
+    let(:prompt_metadata) do
+      {
+        properties: { message_id: 'audit_prompt_123', correlation_id: 'req-ordered', content_encoding: 'identity' },
+        headers:    {
+          'x-legion-retention'        => 'default',
+          'x-legion-contains-phi'     => 'false',
+          'x-legion-classification'   => 'internal',
+          'x-legion-llm-request-type' => 'chat'
+        }
+      }
+    end
+
+    let(:prompt_payload) do
+      {
+        message_context:     { conversation_id: 'conv_123', request_id: request_id },
+        routing:             { provider: 'ollama', model: 'qwen3.5:27b', tier: 'fleet', instance: 'local' },
+        tokens:              { input: 42, output: 28, total: 70 },
+        request:             { messages: [{ role: 'user', content: 'Hello' }] },
+        response:            { message: { role: 'assistant', content: 'Hi' } }
+      }
+    end
+
+    let(:metering_payload) do
+      {
+        message_context: { conversation_id: 'conv_123', request_id: request_id },
+        request_type:    'chat',
+        provider:        'ollama',
+        model_id:        'qwen3.5:27b',
+        input_tokens:    42,
+        output_tokens:   28,
+        total_tokens:    70
+      }
+    end
+
+    let(:thin_metering_payload) do
+      { provider: 'ollama', model_id: 'qwen3.5:27b', input_tokens: 10, output_tokens: 5, total_tokens: 15 }
+    end
+    let(:thin_metering_metadata) { { properties: { message_id: 'thin-1' } } }
+
+    context 'cross-runner ordering invariants' do
+      let(:request_id) { 'req-ordered' }
+
+      it 'keeps one request, one response, one metric for prompt-first' do
+        Legion::Extensions::Llm::Ledger::Runners::Prompts.write_prompt_record(
+          prompt_payload,
+          prompt_metadata
+        )
+        described_class.write_metering_record(metering_payload, metering_metadata)
+
+        expect(Legion::Data::Models::LLM::MessageInferenceRequest.count).to eq(1)
+        expect(Legion::Data::Models::LLM::MessageInferenceResponse.count).to eq(1)
+        expect(Legion::Data::Models::LLM::MessageInferenceMetric.count).to eq(1)
+      end
+
+      it 'keeps one request, one response, one metric for metering-first' do
+        described_class.write_metering_record(metering_payload, metering_metadata)
+        Legion::Extensions::Llm::Ledger::Runners::Prompts.write_prompt_record(
+          prompt_payload,
+          prompt_metadata
+        )
+
+        expect(Legion::Data::Models::LLM::MessageInferenceRequest.count).to eq(1)
+        expect(Legion::Data::Models::LLM::MessageInferenceResponse.count).to eq(1)
+        expect(Legion::Data::Models::LLM::MessageInferenceMetric.count).to eq(1)
+      end
+    end
+
+    context 'idempotency and redelivery' do
+      let(:request_id) { 'req-audit-1' }
+
+      it 'is idempotent when the same metering payload is delivered twice' do
+        2.times { described_class.write_metering_record(metering_payload, metering_metadata) }
+        expect(Legion::Data::Models::LLM::MessageInferenceMetric.count).to eq(1)
+      end
+
+      it 'is idempotent when the same prompt payload is delivered twice' do
+        2.times do
+          Legion::Extensions::Llm::Ledger::Runners::Prompts.write_prompt_record(
+            prompt_payload,
+            prompt_metadata
+          )
+        end
+        expect(Legion::Data::Models::LLM::MessageInferenceRequest.count).to eq(1)
+      end
+    end
+
+    context 'string-keyed headers resolution' do
+      let(:request_id) { 'req-headers-1' }
+
+      it 'continues to resolve routing fields from string-keyed headers' do
+        payload = { request_id: request_id, input_tokens: 10, output_tokens: 5 }
+        metadata = {
+          headers: {
+            'x-legion-llm-provider' => 'vllm',
+            'x-legion-llm-model'    => 'gemma-4-31b-it',
+            'x-legion-llm-tier'     => 'direct'
+          },
+          properties: { message_id: 'hdr-1' }
+        }
+
+        result = described_class.write_metering_record(payload, metadata)
+        metric = Legion::Data::Models::LLM::MessageInferenceMetric.first
+
+        expect(result[:result]).to eq(:ok)
+        expect(metric.provider).to eq('vllm')
+        expect(metric.model_key).to eq('gemma-4-31b-it')
+        expect(metric.tier).to eq('direct')
+      end
+    end
+
+    context 'thin metering payloads' do
+      it 'does not create llm_messages rows for thin metering-only payloads' do
+        described_class.write_metering_record(thin_metering_payload, thin_metering_metadata)
+        expect(Legion::Data::Models::LLM::Message.count).to eq(0)
+      end
+
+      it 'preserves orphaned lifecycle behavior for thin metering with no correlating ids' do
+        described_class.write_metering_record(thin_metering_payload, thin_metering_metadata)
+
+        expect(Legion::Data::Models::LLM::MessageInferenceRequest.count).to eq(1)
+        expect(Legion::Data::Models::LLM::MessageInferenceResponse.count).to eq(1)
+        expect(Legion::Data::Models::LLM::MessageInferenceMetric.count).to eq(1)
+      end
+    end
+
+    context 'kwargs contract' do
+      let(:request_id) { 'req-kwargs-1' }
+
+      it 'accepts kwargs entrypoints for metering writes' do
+        result = described_class.write_metering_record(payload: metering_payload, metadata: metering_metadata, ignored: 'ok')
+        expect(result[:result]).to eq(:ok)
+      end
+    end
+
+    context 'route attempt preservation' do
+      let(:request_id) { 'req-route-1' }
+
+      it 'does not create route attempts for metering without route_attempt_details' do
+        described_class.write_metering_record(metering_payload, metering_metadata)
+        expect(Legion::Data.connection[:llm_route_attempts].count).to eq(0)
+      end
+    end
+
+    context 'conversation dedup' do
+      let(:request_id) { 'req-conv-dedup-1' }
+
+      it 'preserves mixed conversation id semantics across identifier formats' do
+        conv_a_payload = metering_payload.merge(
+          message_context: { conversation_id: 'conv_23b2e22115f141b5', request_id: 'req-conv-a' },
+          provider: 'ollama'
+        )
+        conv_a_metadata = { properties: { message_id: 'conv-a-m', correlation_id: 'req-conv-a' } }
+        conv_b_payload = metering_payload.merge(
+          message_context: { conversation_id: '7bf0dcda-c2c3-4e3a-92af-665af3292c56', request_id: 'req-conv-b' },
+          provider: 'ollama'
+        )
+        conv_b_metadata = { properties: { message_id: 'conv-b-m', correlation_id: 'req-conv-b' } }
+
+        described_class.write_metering_record(conv_a_payload, conv_a_metadata)
+        described_class.write_metering_record(conv_b_payload, conv_b_metadata)
+
+        expect(Legion::Data::Models::LLM::Conversation.count).to eq(2)
+      end
+    end
+  end
 end

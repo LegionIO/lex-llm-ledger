@@ -1,0 +1,40 @@
+{
+  "status_metrics": {
+    "commit_count": 0,
+    "pr_count": 0,
+    "bugs_found": 0,
+    "bug_fix_time_minutes": 0,
+    "independent_step_completion_rate": 0.0,
+    "tests_failed_during_implementation": 0,
+    "tests_passed_or_skipped": 0,
+    "tests_total": 0,
+    "spec_count_green": 0,
+    "spec_files_completed": 0,
+    "spec_files_total": 0,
+    "token_count_approx": 0,
+    "cost_usd_approx": 0.0,
+    "deployment_success": false
+  },
+  "improvement_metrics": {
+    "determinism_score": 0,
+    "quality_score": 0,
+    "speed_score": 0,
+    "integration_score": 0,
+    "repeat_execution_success": false,
+    "clean_checkout_success": false,
+    "automated_verification_pass": false,
+    "failed_step_description": "N/A",
+    "root_cause_analysis": "N/A",
+    "dependencies_satisfied": true,
+    "export_portability_score": 0,
+    "approximate_steps": 0,
+    "time_to_completion_seconds": 0,
+    "test_error_count": 0,
+    "suggestion_applied": false
+  },
+  "implementation_details": {
+    "plan_path": "docs/superpowers/plans/2026-06-20-ledger-runner-rewrite.md",
+    "plan_date": "2026-06-20",
+    "additional_specs_created": 0
+  }
+}

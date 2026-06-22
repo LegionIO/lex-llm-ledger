@@ -44,6 +44,22 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Backfill::LegacyLlmRecords do
     end.to raise_error(ArgumentError, /Legacy LLM writer mode is disabled/)
   end
 
+  # PRESERVATION CONTRACT — verify backfill UUID derivation is stable.
+  describe 'preservation contract' do
+    context 'backfill stability' do
+      it 'does not re-process archived legacy rows on rerun' do
+        insert_legacy_prompt
+        insert_legacy_metering
+
+        described_class.run
+        rerun = described_class.run
+
+        expect(rerun[:z_archive_llm_prompt_records]).to eq(0)
+        expect(rerun[:z_archive_llm_metering_records]).to eq(0)
+      end
+    end
+  end
+
   def insert_legacy_prompt
     Legion::Data.connection[:z_archive_llm_prompt_records].insert(
       message_id:             'audit-1',
