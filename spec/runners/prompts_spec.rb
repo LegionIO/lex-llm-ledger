@@ -42,9 +42,9 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Prompts do
     }
   end
 
-  describe '.write_prompt_record' do
+  describe '.insert' do
     it 'inserts official lifecycle rows and returns ok' do
-      result = described_class.write_prompt_record(decrypted_body, metadata)
+      result = described_class.insert(payload: decrypted_body, metadata: metadata)
       expect(result).to include(result: :ok)
 
       conversation = Legion::Data.connection[:llm_conversations].first
@@ -66,7 +66,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Prompts do
     end
 
     it 'stores request, visible response, and thinking as structured JSON' do
-      described_class.write_prompt_record(decrypted_body, metadata)
+      described_class.insert(payload: decrypted_body, metadata: metadata)
       request = Legion::Data.connection[:llm_message_inference_requests].first
       response = Legion::Data.connection[:llm_message_inference_responses].first
 
@@ -80,7 +80,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Prompts do
     end
 
     it 'accepts subscription keyword envelopes with payload and metadata' do
-      result = described_class.write_prompt_record(payload: decrypted_body, metadata: metadata)
+      result = described_class.insert(payload: decrypted_body, metadata: metadata)
 
       expect(result).to include(result: :ok)
       request = Legion::Data.connection[:llm_message_inference_requests].first
@@ -89,8 +89,8 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Prompts do
     end
 
     it 'is idempotent on second insert' do
-      described_class.write_prompt_record(decrypted_body, metadata)
-      result = described_class.write_prompt_record(decrypted_body, metadata)
+      described_class.insert(payload: decrypted_body, metadata: metadata)
+      result = described_class.insert(payload: decrypted_body, metadata: metadata)
 
       expect(result).to include(result: :ok)
       expect(Legion::Data.connection[:llm_message_inference_requests].count).to eq(1)
@@ -100,21 +100,21 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Prompts do
 
     it 'sets contains_phi true from header' do
       metadata[:headers]['x-legion-contains-phi'] = 'true'
-      described_class.write_prompt_record(decrypted_body, metadata)
+      described_class.insert(payload: decrypted_body, metadata: metadata)
       row = Legion::Data.connection[:llm_conversations].first
       expect(row[:contains_phi]).to be true
     end
 
     it 'applies PHI TTL cap when PHI flagged' do
       metadata[:headers]['x-legion-contains-phi'] = 'true'
-      described_class.write_prompt_record(decrypted_body, metadata)
+      described_class.insert(payload: decrypted_body, metadata: metadata)
       row = Legion::Data.connection[:llm_conversations].first
       expect(row[:expires_at]).not_to be_nil
     end
 
     it 'sets nil expires_at for permanent non-PHI' do
       metadata[:headers]['x-legion-retention'] = 'permanent'
-      described_class.write_prompt_record(decrypted_body, metadata)
+      described_class.insert(payload: decrypted_body, metadata: metadata)
       row = Legion::Data.connection[:llm_conversations].first
       expect(row[:expires_at]).to be_nil
     end
@@ -146,7 +146,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Prompts do
     it 'propagates DecryptionFailed for missing iv headers (NACK without requeue)' do
       metadata[:properties][:content_encoding] = 'encrypted/cs'
       expect do
-        described_class.write_prompt_record('encrypted_blob', metadata)
+        described_class.insert(payload: 'encrypted_blob', metadata: metadata)
       end.to raise_error(Legion::Extensions::Llm::Ledger::Helpers::DecryptionFailed, /missing iv/)
     end
 
@@ -159,7 +159,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Prompts do
       end
 
       it 'extracts thinking from inline tags into response_thinking_json' do
-        described_class.write_prompt_record(inline_thinking_body, metadata)
+        described_class.insert(payload: inline_thinking_body, metadata: metadata)
 
         response = Legion::Data.connection[:llm_message_inference_responses].first
         thinking_json = JSON.parse(response[:response_thinking_json])
@@ -178,11 +178,11 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Prompts do
 
     let(:prompt_payload) do
       {
-        message_context:     { conversation_id: 'conv-123', request_id: request_id },
-        routing:             { provider: 'ollama', model: 'qwen3.5:27b', tier: 'fleet', instance: 'local' },
-        tokens:              { input: 42, output: 28, total: 70 },
-        request:             { messages: [{ role: 'user', content: 'Hello' }] },
-        response:            { message: { role: 'assistant', content: 'Hi' } }
+        message_context: { conversation_id: 'conv-123', request_id: request_id },
+        routing:         { provider: 'ollama', model: 'qwen3.5:27b', tier: 'fleet', instance: 'local' },
+        tokens:          { input: 42, output: 28, total: 70 },
+        request:         { messages: [{ role: 'user', content: 'Hello' }] },
+        response:        { message: { role: 'assistant', content: 'Hi' } }
       }
     end
 
@@ -207,8 +207,8 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Prompts do
           caller: { class: 'Legion::Llm::Inference::Executor' }
         )
 
-        described_class.write_prompt_record(escalation_payload, prompt_metadata)
-        described_class.write_prompt_record(executor_payload, prompt_metadata)
+        described_class.insert(payload: escalation_payload, metadata: prompt_metadata)
+        described_class.insert(payload: executor_payload, metadata: prompt_metadata)
 
         request = Legion::Data::Models::LLM::MessageInferenceRequest.lookup(request_id)
         expect(request[:runtime_caller_class]).to eq('Legion::Llm::Inference::Executor::Escalation')
@@ -217,7 +217,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Prompts do
 
     context 'kwargs contract' do
       it 'accepts kwargs entrypoints for prompt writes' do
-        result = described_class.write_prompt_record(payload: prompt_payload, metadata: prompt_metadata, ignored: 'ok')
+        result = described_class.insert(payload: prompt_payload, metadata: prompt_metadata, ignored: 'ok')
         expect(result[:result]).to eq(:ok)
       end
     end
@@ -233,8 +233,8 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Prompts do
         meta_a = prompt_metadata.merge(properties: { message_id: 'prompt-a', correlation_id: 'req-conv-a' })
         meta_b = prompt_metadata.merge(properties: { message_id: 'prompt-b', correlation_id: 'req-conv-b' })
 
-        described_class.write_prompt_record(conv_a, meta_a)
-        described_class.write_prompt_record(conv_b, meta_b)
+        described_class.insert(payload: conv_a, metadata: meta_a)
+        described_class.insert(payload: conv_b, metadata: meta_b)
 
         expect(Legion::Data::Models::LLM::Conversation.count).to eq(2)
       end

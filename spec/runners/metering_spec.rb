@@ -45,9 +45,9 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Metering do
     }
   end
 
-  describe '.write_metering_record' do
+  describe '.insert' do
     it 'inserts official lifecycle metric rows and returns ok' do
-      result = described_class.write_metering_record(payload, metadata)
+      result = described_class.insert(payload: payload, metadata: metadata)
       expect(result).to include(result: :ok)
 
       request = Legion::Data.connection[:llm_message_inference_requests].first
@@ -71,8 +71,8 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Metering do
     end
 
     it 'is idempotent on second insert with same message_id' do
-      described_class.write_metering_record(payload, metadata)
-      result = described_class.write_metering_record(payload, metadata)
+      described_class.insert(payload: payload, metadata: metadata)
+      result = described_class.insert(payload: payload, metadata: metadata)
 
       expect(result).to include(result: :ok)
       expect(Legion::Data.connection[:llm_message_inference_metrics].count).to eq(1)
@@ -80,7 +80,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Metering do
 
     it 'handles nil billing block' do
       payload.delete(:billing)
-      result = described_class.write_metering_record(payload, metadata)
+      result = described_class.insert(payload: payload, metadata: metadata)
       expect(result).to include(result: :ok)
 
       row = Legion::Data.connection[:llm_message_inference_metrics].first
@@ -90,14 +90,14 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Metering do
 
     it 'stores zero thinking_tokens' do
       payload[:thinking_tokens] = 0
-      described_class.write_metering_record(payload, metadata)
+      described_class.insert(payload: payload, metadata: metadata)
       row = Legion::Data.connection[:llm_message_inference_metrics].first
       expect(row[:thinking_tokens]).to eq(0)
     end
 
     it 'converts nil token values to zero' do
       payload[:thinking_tokens] = nil
-      described_class.write_metering_record(payload, metadata)
+      described_class.insert(payload: payload, metadata: metadata)
       row = Legion::Data.connection[:llm_message_inference_metrics].first
       expect(row[:thinking_tokens]).to eq(0)
     end
@@ -168,11 +168,11 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Metering do
 
     let(:prompt_payload) do
       {
-        message_context:     { conversation_id: 'conv_123', request_id: request_id },
-        routing:             { provider: 'ollama', model: 'qwen3.5:27b', tier: 'fleet', instance: 'local' },
-        tokens:              { input: 42, output: 28, total: 70 },
-        request:             { messages: [{ role: 'user', content: 'Hello' }] },
-        response:            { message: { role: 'assistant', content: 'Hi' } }
+        message_context: { conversation_id: 'conv_123', request_id: request_id },
+        routing:         { provider: 'ollama', model: 'qwen3.5:27b', tier: 'fleet', instance: 'local' },
+        tokens:          { input: 42, output: 28, total: 70 },
+        request:         { messages: [{ role: 'user', content: 'Hello' }] },
+        response:        { message: { role: 'assistant', content: 'Hi' } }
       }
     end
 
@@ -197,11 +197,11 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Metering do
       let(:request_id) { 'req-ordered' }
 
       it 'keeps one request, one response, one metric for prompt-first' do
-        Legion::Extensions::Llm::Ledger::Runners::Prompts.write_prompt_record(
-          prompt_payload,
-          prompt_metadata
+        Legion::Extensions::Llm::Ledger::Runners::Prompts.insert(
+          payload:  prompt_payload,
+          metadata: prompt_metadata
         )
-        described_class.write_metering_record(metering_payload, metering_metadata)
+        described_class.insert(payload: metering_payload, metadata: metering_metadata)
 
         expect(Legion::Data::Models::LLM::MessageInferenceRequest.count).to eq(1)
         expect(Legion::Data::Models::LLM::MessageInferenceResponse.count).to eq(1)
@@ -209,10 +209,10 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Metering do
       end
 
       it 'keeps one request, one response, one metric for metering-first' do
-        described_class.write_metering_record(metering_payload, metering_metadata)
-        Legion::Extensions::Llm::Ledger::Runners::Prompts.write_prompt_record(
-          prompt_payload,
-          prompt_metadata
+        described_class.insert(payload: metering_payload, metadata: metering_metadata)
+        Legion::Extensions::Llm::Ledger::Runners::Prompts.insert(
+          payload:  prompt_payload,
+          metadata: prompt_metadata
         )
 
         expect(Legion::Data::Models::LLM::MessageInferenceRequest.count).to eq(1)
@@ -225,15 +225,15 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Metering do
       let(:request_id) { 'req-audit-1' }
 
       it 'is idempotent when the same metering payload is delivered twice' do
-        2.times { described_class.write_metering_record(metering_payload, metering_metadata) }
+        2.times { described_class.insert(payload: metering_payload, metadata: metering_metadata) }
         expect(Legion::Data::Models::LLM::MessageInferenceMetric.count).to eq(1)
       end
 
       it 'is idempotent when the same prompt payload is delivered twice' do
         2.times do
-          Legion::Extensions::Llm::Ledger::Runners::Prompts.write_prompt_record(
-            prompt_payload,
-            prompt_metadata
+          Legion::Extensions::Llm::Ledger::Runners::Prompts.insert(
+            payload:  prompt_payload,
+            metadata: prompt_metadata
           )
         end
         expect(Legion::Data::Models::LLM::MessageInferenceRequest.count).to eq(1)
@@ -246,7 +246,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Metering do
       it 'continues to resolve routing fields from string-keyed headers' do
         payload = { request_id: request_id, input_tokens: 10, output_tokens: 5 }
         metadata = {
-          headers: {
+          headers:    {
             'x-legion-llm-provider' => 'vllm',
             'x-legion-llm-model'    => 'gemma-4-31b-it',
             'x-legion-llm-tier'     => 'direct'
@@ -254,7 +254,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Metering do
           properties: { message_id: 'hdr-1' }
         }
 
-        result = described_class.write_metering_record(payload, metadata)
+        result = described_class.insert(payload: payload, metadata: metadata)
         metric = Legion::Data::Models::LLM::MessageInferenceMetric.first
 
         expect(result[:result]).to eq(:ok)
@@ -266,12 +266,12 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Metering do
 
     context 'thin metering payloads' do
       it 'does not create llm_messages rows for thin metering-only payloads' do
-        described_class.write_metering_record(thin_metering_payload, thin_metering_metadata)
+        described_class.insert(payload: thin_metering_payload, metadata: thin_metering_metadata)
         expect(Legion::Data::Models::LLM::Message.count).to eq(0)
       end
 
       it 'preserves orphaned lifecycle behavior for thin metering with no correlating ids' do
-        described_class.write_metering_record(thin_metering_payload, thin_metering_metadata)
+        described_class.insert(payload: thin_metering_payload, metadata: thin_metering_metadata)
 
         expect(Legion::Data::Models::LLM::MessageInferenceRequest.count).to eq(1)
         expect(Legion::Data::Models::LLM::MessageInferenceResponse.count).to eq(1)
@@ -283,7 +283,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Metering do
       let(:request_id) { 'req-kwargs-1' }
 
       it 'accepts kwargs entrypoints for metering writes' do
-        result = described_class.write_metering_record(payload: metering_payload, metadata: metering_metadata, ignored: 'ok')
+        result = described_class.insert(payload: metering_payload, metadata: metering_metadata, ignored: 'ok')
         expect(result[:result]).to eq(:ok)
       end
     end
@@ -292,7 +292,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Metering do
       let(:request_id) { 'req-route-1' }
 
       it 'does not create route attempts for metering without route_attempt_details' do
-        described_class.write_metering_record(metering_payload, metering_metadata)
+        described_class.insert(payload: metering_payload, metadata: metering_metadata)
         expect(Legion::Data.connection[:llm_route_attempts].count).to eq(0)
       end
     end
@@ -303,17 +303,17 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Metering do
       it 'preserves mixed conversation id semantics across identifier formats' do
         conv_a_payload = metering_payload.merge(
           message_context: { conversation_id: 'conv_23b2e22115f141b5', request_id: 'req-conv-a' },
-          provider: 'ollama'
+          provider:        'ollama'
         )
         conv_a_metadata = { properties: { message_id: 'conv-a-m', correlation_id: 'req-conv-a' } }
         conv_b_payload = metering_payload.merge(
           message_context: { conversation_id: '7bf0dcda-c2c3-4e3a-92af-665af3292c56', request_id: 'req-conv-b' },
-          provider: 'ollama'
+          provider:        'ollama'
         )
         conv_b_metadata = { properties: { message_id: 'conv-b-m', correlation_id: 'req-conv-b' } }
 
-        described_class.write_metering_record(conv_a_payload, conv_a_metadata)
-        described_class.write_metering_record(conv_b_payload, conv_b_metadata)
+        described_class.insert(payload: conv_a_payload, metadata: conv_a_metadata)
+        described_class.insert(payload: conv_b_payload, metadata: conv_b_metadata)
 
         expect(Legion::Data::Models::LLM::Conversation.count).to eq(2)
       end

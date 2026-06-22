@@ -5,6 +5,8 @@ require_relative 'stable_identifiers'
 require_relative 'request_refs'
 require_relative 'identity_resolution'
 require_relative 'lifecycle_enrichment'
+require_relative 'response_message_linking'
+require_relative 'route_attempt_persistence'
 require_relative '../helpers/json'
 require_relative '../helpers/persistence_logging'
 
@@ -20,6 +22,8 @@ module Legion
             extend Legion::Logging::Helper
             extend StableIdentifiers
             extend RequestRefs
+
+            module_function
 
             CONTEXT_ACCOUNTING_STATUS_RANK = {
               'missing'             => 0,
@@ -39,9 +43,9 @@ module Legion
                 request = find_or_create_request(db, conversation, user_message, body)
                 response_message = find_or_create_response_message(db, conversation, request, body)
                 response = find_or_create_response(db, request, response_message, body)
-                response_message_linking_link_response_message!(db, response_message, response)
+                ResponseMessageLinking.response_message_linking_link_response_message!(db, response_message, response)
                 metric = find_or_create_metric(db, request, response, body)
-                OfficialRouteAttemptWriter.write_route_attempts(db, request, response, body)
+                RouteAttemptPersistence.write_route_attempts(db, request, response, body)
                 result = { result: :ok, request_id: request[:id], response_id: response[:id], metric_id: metric[:id] }
               end
 
@@ -57,7 +61,7 @@ module Legion
                 request = find_or_create_request(db, conversation, nil, body)
                 response = find_or_create_response(db, request, nil, body)
                 metric = find_or_create_metric(db, request, response, body)
-                OfficialRouteAttemptWriter.write_route_attempts(db, request, response, body)
+                RouteAttemptPersistence.write_route_attempts(db, request, response, body)
                 result = { result: :ok, request_id: request[:id], response_id: response[:id], metric_id: metric[:id] }
               end
 
@@ -77,18 +81,20 @@ module Legion
                                     classification_level:    classification_level(body),
                                     contains_phi:            LifecycleEnrichment.contains_phi?(body),
                                     contains_pii:            LifecycleEnrichment.contains_pii?(body),
-                                    pii_types_json:          json_dump(Array(body.dig(:classification, :pii_types))),
-                                    jurisdictions_json:      json_dump(Array(body.dig(:classification, :jurisdictions) || body[:jurisdictions])),
+                                    pii_types_json:          LifecycleEnrichment.json_dump(Array(body.dig(:classification, :pii_types))),
+                                    jurisdictions_json:      LifecycleEnrichment.json_dump(Array(body.dig(:classification,
+                                                                                                          :jurisdictions) || body[:jurisdictions])),
                                     retention_policy:        body[:retention_policy] || 'default',
                                     expires_at:              body[:expires_at],
-                                    identity_canonical_name: LifecycleResolution.identity_canonical_name(body),
+                                    identity_canonical_name: Helpers::IdentityResolution.identity_canonical_name(body),
                                     recorded_at:             LifecycleEnrichment.recorded_at(body),
                                     inserted_at:             Time.now.utc,
                                     created_at:              Time.now.utc,
                                     updated_at:              Time.now.utc
                                   }, operation: 'lifecycle_persistence.conversation')
               llm_conversation_model[id]
-            rescue Sequel::UniqueConstraintViolation
+            rescue Sequel::UniqueConstraintViolation => e
+              handle_exception(e, level: :debug, handled: true, operation: 'lifecycle_persistence.conversation_race')
               llm_conversation_model.first(uuid: uuid)
             end
 
@@ -112,12 +118,13 @@ module Legion
                                       output_tokens:           0,
                                       identity_principal_id:   IdentityResolution.caller_identity_refs(db, body)[:principal_id],
                                       identity_id:             IdentityResolution.caller_identity_refs(db, body)[:identity_id],
-                                      identity_canonical_name: LifecycleResolution.identity_canonical_name(body),
+                                      identity_canonical_name: Helpers::IdentityResolution.identity_canonical_name(body),
                                       created_at:              LifecycleEnrichment.recorded_at(body),
                                       inserted_at:             Time.now.utc
                                     }, operation: 'lifecycle_persistence.user_message')
                 llm_message_model[id]
-              rescue Sequel::UniqueConstraintViolation
+              rescue Sequel::UniqueConstraintViolation => e
+                handle_exception(e, level: :debug, handled: true, operation: 'lifecycle_persistence.user_message_race')
                 llm_message_model.first(uuid: uuid) ||
                   llm_message_model.first(conversation_id: conversation[:id], seq: seq)
               end
@@ -139,7 +146,7 @@ module Legion
                                     parent_request_id:       LifecycleEnrichment.resolve_parent_request_id(db, body),
                                     caller_principal_id:     caller_refs[:principal_id],
                                     caller_identity_id:      caller_refs[:identity_id],
-                                    identity_canonical_name: LifecycleResolution.identity_canonical_name(body),
+                                    identity_canonical_name: Helpers::IdentityResolution.identity_canonical_name(body),
                                     runtime_caller_type:     LifecycleEnrichment.caller_type(body),
                                     runtime_caller_class:    LifecycleEnrichment.runtime_caller_class(body),
                                     runtime_caller_client:   LifecycleEnrichment.runtime_caller_client(body),
@@ -171,7 +178,8 @@ module Legion
                                     inserted_at:             Time.now.utc
                                   }, operation: 'lifecycle_persistence.inference_request')
               llm_request_model[id]
-            rescue Sequel::UniqueConstraintViolation
+            rescue Sequel::UniqueConstraintViolation => e
+              handle_exception(e, level: :debug, handled: true, operation: 'lifecycle_persistence.request_race')
               existing = llm_request_model.lookup(request_id)
               return LifecycleEnrichment.enrich_request!(db, existing, body, latest_message) if existing
 
@@ -201,12 +209,13 @@ module Legion
                                       output_tokens:                LifecycleEnrichment.token_count(body, :output_tokens),
                                       identity_principal_id:        IdentityResolution.caller_identity_refs(db, body)[:principal_id],
                                       identity_id:                  IdentityResolution.caller_identity_refs(db, body)[:identity_id],
-                                      identity_canonical_name:      LifecycleResolution.identity_canonical_name(body),
+                                      identity_canonical_name:      Helpers::IdentityResolution.identity_canonical_name(body),
                                       created_at:                   LifecycleEnrichment.recorded_at(body),
                                       inserted_at:                  Time.now.utc
                                     }, operation: 'lifecycle_persistence.response_message')
                 llm_message_model[id]
-              rescue Sequel::UniqueConstraintViolation
+              rescue Sequel::UniqueConstraintViolation => e
+                handle_exception(e, level: :debug, handled: true, operation: 'lifecycle_persistence.response_message_race')
                 llm_message_model.first(uuid: uuid) ||
                   llm_message_model.first(conversation_id: conversation[:id], seq: seq)
               end
@@ -215,12 +224,12 @@ module Legion
             # --- Response ---
 
             def find_or_create_response(db, request, response_message, body)
-              response_uuid = stable_uuid(reference(body, :provider_response_ref) || "response:#{request_ref(body)}:#{LifecycleEnrichment.provider(body) || 'unknown'}")
+              response_ref = reference(body, :provider_response_ref) ||
+                             "response:#{request_ref(body)}:#{LifecycleEnrichment.provider(body) || 'unknown'}"
+              response_uuid = stable_uuid(response_ref)
               existing = llm_response_model.first(uuid: response_uuid)
 
-              unless existing
-                existing = llm_response_model.first(message_inference_request_id: request[:id])
-              end
+              existing ||= llm_response_model.first(message_inference_request_id: request[:id])
 
               if existing
                 LifecycleEnrichment.enrich_response!(db, existing, response_message, body)
@@ -246,8 +255,15 @@ module Legion
                                     latency_ms:                   LifecycleEnrichment.integer(body[:latency_ms]),
                                     wall_clock_ms:                LifecycleEnrichment.integer(body[:wall_clock_ms]),
                                     response_capture_mode:        'full',
-                                    response_json:                vis_resp ? LifecycleEnrichment.phi_protect(LifecycleEnrichment.storage_json_dump(vis_resp), phi) : nil,
-                                    response_thinking_json:       think_resp ? LifecycleEnrichment.phi_protect(LifecycleEnrichment.storage_json_dump(think_resp), phi) : nil,
+                                    response_json:                if vis_resp
+                                                                    LifecycleEnrichment.phi_protect(LifecycleEnrichment.storage_json_dump(vis_resp),
+                                                                                                    phi)
+                                                                  end,
+                                    response_thinking_json:       if think_resp
+                                                                    LifecycleEnrichment.phi_protect(
+                                                                      LifecycleEnrichment.storage_json_dump(think_resp), phi
+                                                                    )
+                                                                  end,
                                     dispatch_path:                body[:dispatch_path] || body[:tier],
                                     error_category:               body[:error_category] || body.dig(:error, :category),
                                     error_code:                   body[:error_code] || body.dig(:error, :code),
@@ -257,12 +273,13 @@ module Legion
                                     escalation_chain_ref:         body[:escalation_chain_ref],
                                     identity_principal_id:        IdentityResolution.caller_identity_refs(db, body)[:principal_id],
                                     identity_id:                  IdentityResolution.caller_identity_refs(db, body)[:identity_id],
-                                    identity_canonical_name:      LifecycleResolution.identity_canonical_name(body),
+                                    identity_canonical_name:      Helpers::IdentityResolution.identity_canonical_name(body),
                                     responded_at:                 LifecycleEnrichment.recorded_at(body),
                                     inserted_at:                  Time.now.utc
                                   }, operation: 'lifecycle_persistence.inference_response')
               llm_response_model[id]
-            rescue Sequel::UniqueConstraintViolation
+            rescue Sequel::UniqueConstraintViolation => e
+              handle_exception(e, level: :debug, handled: true, operation: 'lifecycle_persistence.response_race')
               existing = llm_response_model.first(uuid: response_uuid)
               if existing
                 LifecycleEnrichment.enrich_response!(db, existing, response_message, body)
@@ -282,7 +299,7 @@ module Legion
                 return existing
               end
 
-              token_values = LifecycleEnrichment.tokens(body)
+              LifecycleEnrichment.tokens(body)
               attrs = {
                 uuid:                          metric_uuid,
                 message_inference_request_id:  request[:id],
@@ -302,7 +319,7 @@ module Legion
                 budget_key:                    LifecycleEnrichment.billing(body)[:budget_id] || LifecycleEnrichment.billing(body)[:budget_key],
                 identity_principal_id:         IdentityResolution.caller_identity_refs(db, body)[:principal_id],
                 identity_id:                   IdentityResolution.caller_identity_refs(db, body)[:identity_id],
-                identity_canonical_name:       LifecycleResolution.identity_canonical_name(body),
+                identity_canonical_name:       Helpers::IdentityResolution.identity_canonical_name(body),
                 recorded_at:                   LifecycleEnrichment.recorded_at(body),
                 inserted_at:                   Time.now.utc
               }.merge(context_accounting_metric_columns(body))
@@ -312,7 +329,8 @@ module Legion
               metric = llm_metric_model[id]
               write_context_accounting_events(db, request, response, metric, body)
               metric
-            rescue Sequel::UniqueConstraintViolation
+            rescue Sequel::UniqueConstraintViolation => e
+              handle_exception(e, level: :debug, handled: true, operation: 'lifecycle_persistence.metric_race')
               existing = llm_metric_model.first(uuid: metric_uuid)
               if existing
                 LifecycleEnrichment.enrich_metric_context_accounting!(db, existing, body)
@@ -326,8 +344,8 @@ module Legion
 
             def context_accounting_metric_columns(body)
               accounting = LifecycleEnrichment.context_accounting(body)
-              token_accounting = LifecycleEnrichment.context_accounting_tokens(body)
-              count_accounting = LifecycleEnrichment.context_accounting_counts(body)
+              LifecycleEnrichment.context_accounting_tokens(body)
+              LifecycleEnrichment.context_accounting_counts(body)
               {
                 request_message_estimated_tokens:      LifecycleEnrichment.token_count(body, :request_message_estimated_tokens),
                 loaded_history_estimated_tokens:       LifecycleEnrichment.token_count(body, :loaded_history_estimated_tokens),
@@ -412,13 +430,11 @@ module Legion
             end
 
             def classification_level(body)
-              ALLOWED_CLASSIFICATION_LEVELS = ['public', 'internal', 'confidential', 'restricted']
+              allowed = %w[public internal confidential restricted]
               raw = body[:classification_level] || body.dig(:classification, :level)
               normalized = raw.to_s.downcase
-              ALLOWED_CLASSIFICATION_LEVELS.include?(normalized) ? normalized : 'internal'
+              allowed.include?(normalized) ? normalized : 'internal'
             end
-
-            private
 
             def llm_conversation_model
               ensure_models_loaded!

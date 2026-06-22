@@ -9,7 +9,6 @@ module Legion
       module Ledger
         module Helpers
           module RequestRefs
-            extend Legion::Logging::Helper
             extend StableIdentifiers
 
             module_function
@@ -45,7 +44,7 @@ module Legion
               keys.lazy.map { |key| body[key] }.find { |value| present?(value) }&.to_s
             end
 
-            def present?(value) # rubocop:disable Naming/PredicateName
+            def present?(value)
               !value.nil? && value.to_s.strip != ''
             end
           end

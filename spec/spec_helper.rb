@@ -113,7 +113,6 @@ require 'legion/extensions/llm/ledger/actors/metering'
 require 'legion/extensions/llm/ledger/actors/prompts'
 require 'legion/extensions/llm/ledger/actors/tools'
 require 'legion/extensions/llm/ledger/actors/registry_availability'
-require 'legion/extensions/llm/ledger/actors/spool_flush'
 
 RSpec.configure do |config|
   config.example_status_persistence_file_path = '.rspec_status'

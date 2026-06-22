@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.7.8] - 2026-06-22
+
+### Changed
+- Remove ledger spool handling from the active runtime path so prompt and metering consumers rely on broker retry semantics instead of local drain logic.
+- Align prompt and metering subscription actors with kwargs-based `insert` runner entrypoints.
+
+### Fixed
+- Repair the extracted lifecycle helper flow so prompt-first, metering-first, and redelivery paths reuse existing request/response rows correctly.
+- Route collision and helper rescue handling through `handle_exception` while keeping full-suite RSpec and RuboCop clean.
+
 ## [0.7.7] - 2026-06-20
 
 ### Changed

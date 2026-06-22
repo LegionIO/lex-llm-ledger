@@ -16,7 +16,7 @@ module Legion
             def runner_class = Legion::Extensions::Llm::Ledger::Runners::Prompts
 
             def runner_function
-              'write_prompt_record'
+              'insert'
             end
 
             def use_runner?

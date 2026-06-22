@@ -15,6 +15,8 @@ module Legion
           module LifecycleEnrichment
             extend Legion::Logging::Helper
 
+            module_function
+
             ALLOWED_CLASSIFICATION_LEVELS = %w[public internal confidential restricted].freeze
 
             # --- Response Enrichment —
@@ -41,10 +43,11 @@ module Legion
                 update_if_placeholder(updates, existing, :response_thinking_json, thinking_json)
               end
 
-              return if updates.empty?
+              return existing if updates.empty?
 
               db[:llm_message_inference_responses].where(id: existing[:id]).update(updates)
               log.info("[ledger] enriched response id=#{existing[:id]} fields=#{updates.keys.join(',')}")
+              existing
             end
 
             # --- Request Enrichment —
@@ -60,10 +63,11 @@ module Legion
               request_json = request_payload(body) ? storage_json_dump(request_payload(body)) : nil
               update_if_placeholder(updates, existing, :request_json, request_json)
 
-              return if updates.empty?
+              return existing if updates.empty?
 
               db[:llm_message_inference_requests].where(id: existing[:id]).update(updates)
               log.info("[ledger] enriched request id=#{existing[:id]} fields=#{updates.keys.join(',')}")
+              existing
             end
 
             # --- Metric Context Accounting Enrichment —
@@ -183,7 +187,22 @@ module Legion
             end
 
             def token_count(body, key)
-              integer(body[key])
+              raw = body[:tokens] || body
+              lookup_key = key.to_sym
+
+              integer(
+                raw[lookup_key] ||
+                raw[token_alias_key(lookup_key)]
+              )
+            end
+
+            def token_alias_key(key)
+              {
+                input_tokens:    :input,
+                output_tokens:   :output,
+                thinking_tokens: :thinking,
+                total_tokens:    :total
+              }[key]
             end
 
             def billing(body)
@@ -274,9 +293,9 @@ module Legion
                          body.dig(:identity, :type) ||
                          body.dig(:caller, :requested_by, :type) ||
                          body.dig(:caller, :source)
-              return Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.normalize_caller_type(raw_type) if present?(raw_type)
+              return Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.normalize_caller_type(raw_type)&.to_s if present?(raw_type)
 
-              parsed_identity_descriptor(body)[:kind]
+              parsed_identity_descriptor(body)[:kind]&.to_s
             end
 
             def runtime_caller_class(body)
@@ -312,7 +331,7 @@ module Legion
 
             # --- Resolve Parent Request —
 
-            def resolve_parent_request_id(db, body)
+            def resolve_parent_request_id(_db, body)
               parent_ref = body[:parent_request_id] || body.dig(:context, :parent_request_id) || body.dig(:caller, :parent_request_ref)
               return nil unless present?(parent_ref)
 
@@ -423,8 +442,6 @@ module Legion
             def storage_json_dump(value)
               Legion::Extensions::Llm::Ledger::Helpers::Json.dump(value, pretty: true)
             end
-
-            private_class_method :present?
           end
         end
       end

@@ -10,9 +10,11 @@ module Legion
         module Helpers
           # Shared helpers used by IdentityResolution and other modules.
           module IdentityUtils
-            extend self
+            extend Legion::Logging::Helper
 
-            def present?(value) # rubocop:disable Naming/PredicateName
+            module_function
+
+            def present?(value)
               !value.nil? && value.to_s.strip != ''
             end
 
@@ -20,7 +22,8 @@ module Legion
               return nil unless value
 
               integer(value)
-            rescue ArgumentError, TypeError
+            rescue ArgumentError, TypeError => e
+              handle_exception(e, level: :debug, handled: true, operation: 'identity_utils.integer_or_nil')
               nil
             end
 
@@ -31,7 +34,13 @@ module Legion
 
             def normalize_provider_name(name)
               return 'local' unless present?(name)
-              (name.to_s.sub(/\A.+:/, '') rescue name.to_s).sub(/\A:+/, '').downcase
+
+              begin
+                name.to_s.sub(/\A.+:/, '')
+              rescue StandardError => e
+                handle_exception(e, level: :debug, handled: true, operation: 'identity_utils.normalize_provider_name')
+                name.to_s
+              end.sub(/\A:+/, '').downcase
             end
           end
 
@@ -121,48 +130,43 @@ module Legion
               return existing if existing
 
               insert_provider_with_savepoint(db, provider_name)
-            rescue Sequel::UniqueConstraintViolation
+            rescue Sequel::UniqueConstraintViolation => e
+              handle_exception(e, level: :debug, handled: true, operation: 'identity_resolution.provider_race')
               ::Legion::Data::Model::Identity::Provider.first(name: provider_name)
             end
 
             def find_or_create_identity_principal(db, descriptor)
               existing = ::Legion::Data::Model::Identity::Principal.first(
                 canonical_name: descriptor[:canonical_name],
-                kind: descriptor[:kind]
+                kind:           descriptor[:kind]
               )
               return existing if existing
 
               insert_principal_with_savepoint(db, descriptor)
-            rescue Sequel::UniqueConstraintViolation
+            rescue Sequel::UniqueConstraintViolation => e
+              handle_exception(e, level: :debug, handled: true, operation: 'identity_resolution.principal_race')
               ::Legion::Data::Model::Identity::Principal.first(
                 canonical_name: descriptor[:canonical_name],
-                kind: descriptor[:kind]
+                kind:           descriptor[:kind]
               )
             end
 
             def find_or_create_identity(db, principal, provider, descriptor)
               existing = ::Legion::Data::Model::Identity::Identity.first(
-                principal_id: principal[:id],
-                provider_id: provider[:id],
+                principal_id:          principal[:id],
+                provider_id:           provider[:id],
                 provider_identity_key: descriptor[:provider_identity_key]
               )
               return existing if existing
 
               insert_identity_with_savepoint(db, principal, provider, descriptor)
-            rescue Sequel::UniqueConstraintViolation
+            rescue Sequel::UniqueConstraintViolation => e
+              handle_exception(e, level: :debug, handled: true, operation: 'identity_resolution.identity_race')
               ::Legion::Data::Model::Identity::Identity.first(
-                principal_id: principal[:id],
-                provider_id: provider[:id],
+                principal_id:          principal[:id],
+                provider_id:           provider[:id],
                 provider_identity_key: descriptor[:provider_identity_key]
               )
-            end
-
-            # Savepoint-wrapped inserts for collision-safe identity writes.
-            def insert_with_savepoint(db, table, attrs)
-              id = db[table].insert(**attrs)
-              id
-            rescue Sequel::UniqueConstraintViolation
-              raise
             end
 
             def insert_provider_with_savepoint(db, provider_name)
@@ -208,21 +212,21 @@ module Legion
               db[:identities].insert(**attrs)
             end
 
-            private_class_method :insert_with_savepoint, :insert_provider_with_savepoint,
+            private_class_method :insert_provider_with_savepoint,
                                  :insert_principal_with_savepoint, :insert_identity_with_savepoint
 
             CANONICAL_TYPES = %i[human service system integration bot external api unknown].freeze
             CALLER_TYPE_MAP = {
-              user: :human,
-              human: :human,
-              person: :human,
-              admin: :system,
-              service: :service,
-              daemon: :service,
-              worker: :service,
-              bot: :bot,
+              user:        :human,
+              human:       :human,
+              person:      :human,
+              admin:       :system,
+              service:     :service,
+              daemon:      :service,
+              worker:      :service,
+              bot:         :bot,
               integration: :integration,
-              external: :external
+              external:    :external
             }.freeze
 
             def resolve_refs(db, body)

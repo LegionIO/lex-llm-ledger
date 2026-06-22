@@ -56,7 +56,7 @@ Event types should cover at least:
 - response normalized, streamed chunk emitted, final response returned
 - MCP/tool call planned, started, completed, failed, denied, or timed out
 - fleet request published, broker accepted/unroutable, worker accepted, worker rejected, fleet response received
-- metering emitted, audit emitted, ledger write queued, ledger write succeeded/failed/spooled
+- metering emitted, audit emitted, ledger write queued, ledger write succeeded/failed, retry/dead-letter outcome
 
 This lets operators reconstruct a conversation without replaying prompt bodies. Example: conversation `123` had 32 messages, one failed, five executed on Anthropic direct, four locally, the rest on GPU fleet, with per-step response time, token totals, cost allocation, and failover history.
 
@@ -101,7 +101,7 @@ Audit capture modes expected from `legion-llm`:
 - `encrypted_raw` - store encrypted full payloads for approved consumers
 - `raw` - plaintext full payloads for local/dev or explicitly approved environments
 
-Prompt/tool audit should be durable. If transport is unavailable, `legion-llm` should spool audit records or use a durable local audit queue unless capture mode is `none` or policy explicitly allows best-effort audit.
+Prompt/tool audit should be durable. If transport is unavailable, `legion-llm` should rely on durable broker semantics or fail closed upstream when policy requires durable audit; ledger does not spool audit locally.
 
 For async `:fleet` inference, ledger records should preserve the original caller identity and record both runtimes: the process that accepted/enqueued the request and the worker process that executed the provider call. Fleet records should also persist the selected lane, worker fleet class (`endpoint`, `datacenter`, `cloud_vpc`, etc.), placement policy, and model provenance so investigators can tell whether a request ran on the caller's own machine, another endpoint, a datacenter GPU, or a cloud-adjacent worker. The raw RabbitMQ `reply_to` queue should remain transport-only; persisted records should use a stable hash plus the `correlation_id` for reconstruction.
 
@@ -109,7 +109,7 @@ Fleet registry history should arrive through RabbitMQ rather than endpoint worke
 
 Ledger should be able to answer spend-allocation questions without replaying raw prompts: how many input/output tokens a conversation used, how tokens split across Anthropic direct versus fleet GPU versus endpoint MacBook fleet, and estimated dollars saved by local/fleet execution compared with a configured cloud/frontier baseline.
 
-Ledger is not on the LLM execution critical path. If the database is unavailable, ledger consumers should retry, requeue, DLQ, or spool according to transport policy while `legion-llm` continues routing and executing requests. Compliance profiles that require durable audit before response are the explicit exception and should fail closed upstream with a clear policy error.
+Ledger is not on the LLM execution critical path. If the database is unavailable, ledger consumers should retry or dead-letter through RabbitMQ transport policy while `legion-llm` continues routing and executing requests. Compliance profiles that require durable audit before response are the explicit exception and should fail closed upstream with a clear policy error.
 
 ## Requirements
 
@@ -149,7 +149,7 @@ rejected as malformed encrypted audit records rather than retried.
 
 ```ruby
 # Metering write (called by Metering actor)
-Legion::Extensions::Llm::Ledger::Runners::Metering.write_metering_record(payload, metadata)
+Legion::Extensions::Llm::Ledger::Runners::Metering.insert(payload: payload, metadata: metadata)
 
 # Usage summary
 Legion::Extensions::Llm::Ledger::Runners::UsageReporter.summary(period: 'day', group_by: 'provider_instance')

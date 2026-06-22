@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
 require 'legion/extensions/llm/responses/thinking_extractor'
+require_relative '../helpers/subscription_message'
 require_relative '../helpers/caller_identity'
 require_relative '../helpers/json'
+require_relative '../helpers/retention'
 
 module Legion
   module Extensions
@@ -14,8 +16,8 @@ module Legion
 
             extend self
 
-            def write_prompt_record(payload = nil, metadata = {}, **message)
-              payload, metadata = normalize_runner_args(payload, metadata, message)
+            # Persist a prompt/payload record into the official lifecycle schema.
+            def insert(payload:, metadata: {}, **_opts)
               headers = Helpers::SubscriptionMessage.extract_headers(payload, metadata)
               props   = metadata[:properties] || {}
 
@@ -27,103 +29,37 @@ module Legion
                 contains_phi: headers['x-legion-contains-phi'] == 'true'
               )
 
-              Writers::OfficialPromptWriter.write(official_prompt_payload(body, ctx, props, headers, expires_at))
+              body.merge!(official_context_payload(body, ctx, props, headers))
+              body.merge!(official_identity_payload(body, headers))
+              body.merge!(official_routing_payload(body, headers))
+              body.merge!(official_compliance_payload(body, headers, expires_at))
+
+              Helpers::LifecyclePersistence.write_prompt(::Legion::Data.connection, body)
             rescue Helpers::DecryptionUnavailable => e
-              handle_exception(e, level: :warn, handled: true, operation: 'write_prompt_record.decrypt')
+              handle_exception(e, level: :warn, handled: true, operation: 'prompts.insert.decrypt')
               raise
             rescue Helpers::DecryptionFailed => e
-              handle_exception(e, level: :error, handled: true, operation: 'write_prompt_record.decrypt')
+              handle_exception(e, level: :error, handled: true, operation: 'prompts.insert.decrypt')
               raise
+            end
+
+            # Link a response message row to an inference response row.
+            def link(response_message_id:, response_id:, **_opts)
+              return { result: :ok } unless response_message_id && response_id
+
+              db = ::Legion::Data.connection
+              Helpers::ResponseMessageLinking.response_message_linking_link_response_message!(
+                db,
+                db[:llm_messages][response_message_id],
+                db[:llm_message_inference_responses][response_id]
+              )
+              { result: :ok }
             rescue StandardError => e
-              handle_exception(e, level: :error, handled: true, operation: 'write_prompt_record')
-              { result: :error, error: e.message }
+              handle_exception(e, level: :warn, handled: true, operation: 'prompts.link')
+              { result: :ok }
             end
 
             private
-
-            def normalize_runner_args(payload, metadata, message)
-              Helpers::SubscriptionMessage.runner_args(payload, metadata, message)
-            end
-
-            def build_prompt_record(body, ctx, props, headers, expires_at) # rubocop:disable Metrics/AbcSize,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
-              routing = body[:routing] || {}
-              tokens  = body[:tokens]  || {}
-              cost    = body[:cost]    || {}
-              caller_raw = body[:caller] || {}
-              identity   = body[:identity] || {}
-              caller_identity = Helpers::CallerIdentity.normalize(
-                caller_raw: caller_raw, identity: identity, headers: headers
-              )
-              agent = body[:agent] || {}
-              cls     = body[:classification] || {}
-              quality = body[:quality] || {}
-              ts      = body[:timestamps] || {}
-              tracing = body[:tracing] || {}
-
-              {
-                message_id:             props[:message_id] || body[:message_id],
-                correlation_id:         props[:correlation_id] || body[:correlation_id] || tracing[:correlation_id],
-                conversation_id:        ctx[:conversation_id] || body[:conversation_id] || headers['x-legion-llm-conversation-id'],
-                message_id_ctx:         ctx[:message_id],
-                parent_message_id:      ctx[:parent_message_id],
-                message_seq:            ctx[:message_seq],
-                request_id:             ctx[:request_id] || body[:request_id] || headers['x-legion-llm-request-id'],
-                exchange_id:            ctx[:exchange_id] || body[:exchange_id],
-                response_message_id:    body[:response_message_id],
-                provider:               routing[:provider] || body[:provider] || headers['x-legion-llm-provider'],
-                model_id:               routing[:model] || body[:model_id] || headers['x-legion-llm-model'],
-                tier:                   routing[:tier] || body[:tier] || headers['x-legion-llm-tier'],
-                request_type:           body[:request_type] || headers['x-legion-llm-request-type'],
-                request_json:           Helpers::Json.dump(body[:request] || body[:messages] || {}),
-                response_json:          Helpers::Json.dump(body[:response] || body[:response_content] || {}),
-                response_thinking_json: Helpers::Json.dump(response_thinking(body)),
-                input_tokens:           (tokens[:input] || tokens[:input_tokens]).to_i,
-                output_tokens:          (tokens[:output] || tokens[:output_tokens]).to_i,
-                total_tokens:           (tokens[:total] || tokens[:total_tokens]).to_i,
-                cost_usd:               cost[:estimated_usd].to_f,
-                caller_identity:        caller_identity[:identity],
-                caller_type:            caller_identity[:type],
-                agent_id:               agent[:id],
-                task_id:                agent[:task_id],
-                classification_level:   cls[:level] || headers['x-legion-classification'],
-                contains_phi:           Helpers::Queries.phi_flag?(cls, headers),
-                contains_pii:           cls[:contains_pii] ? true : false,
-                jurisdictions:          Array(cls[:jurisdictions]).join(','),
-                quality_score:          quality[:score],
-                quality_band:           quality[:band],
-                retention_policy:       headers['x-legion-retention'] || 'default',
-                expires_at:             expires_at,
-                recorded_at:            ts[:returned] || ts[:provider_end] || body[:timestamp],
-                inserted_at:            Time.now.utc
-              }
-            end
-
-            def response_thinking(body)
-              thinking = body[:response_thinking] || body[:thinking]
-              thinking ||= body.dig(:response, :thinking) if body[:response].is_a?(Hash)
-              if thinking
-                thinking.is_a?(Hash) ? thinking : { content: thinking }
-              else
-                extract_thinking_from_content(body)
-              end
-            end
-
-            def extract_thinking_from_content(body)
-              content_str = body[:response_content] || body[:response] || body[:content]
-              return {} unless content_str.is_a?(String)
-
-              _clean, extracted = extract_inline_thinking(content_str)
-              extracted ? { content: extracted } : {}
-            end
-
-            def extract_inline_thinking(text)
-              if defined?(::Legion::Extensions::Llm::Responses::ThinkingExtractor)
-                extraction = ::Legion::Extensions::Llm::Responses::ThinkingExtractor.extract(text)
-                [extraction.content, extraction.thinking]
-              else
-                [text, nil]
-              end
-            end
 
             def official_prompt_payload(body, ctx, props, headers, expires_at)
               body.merge(
@@ -171,21 +107,15 @@ module Legion
             def official_compliance_payload(body, headers, expires_at)
               cls = body[:classification] || {}
               {
-                retention_policy:     headers['x-legion-retention'] || body[:retention_policy],
-                expires_at:           expires_at,
-                contains_phi:         headers['x-legion-contains-phi'] == 'true' || cls[:contains_phi],
-                contains_pii:         cls[:contains_pii] ? true : false,
-                pii_types_json:       Helpers::Json.dump(Array(cls[:pii_types])),
-                classification_level: normalize_classification(cls[:level] || headers['x-legion-classification']),
-                jurisdictions:        Helpers::Json.dump(Array(cls[:jurisdictions]))
-              }
-            end
-
-            def normalize_classification(level)
-              return 'internal' if level.nil? || level.to_s.empty? # rubocop:disable Legion/Extension/RunnerReturnHash
-
-              normalized = level.to_s.downcase
-              ALLOWED_CLASSIFICATION_LEVELS.include?(normalized) ? normalized : 'internal'
+                retention_policy: headers['x-legion-retention'] || body[:retention_policy],
+                expires_at:       expires_at,
+                contains_phi:     headers['x-legion-contains-phi'] == 'true' || cls[:contains_phi],
+                contains_pii:     cls[:contains_pii] ? true : false
+              }.tap do |p|
+                p[:classification_level] = Helpers::LifecycleEnrichment.classification_level(
+                  classification: { level: cls[:level] || headers['x-legion-classification'] }
+                )
+              end
             end
 
             include Legion::Extensions::Helpers::Lex if Legion::Extensions.const_defined?(:Helpers, false) &&

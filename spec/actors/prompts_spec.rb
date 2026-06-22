@@ -7,8 +7,8 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Actor::Prompts do
     expect(actor.runner_class).to eq(Legion::Extensions::Llm::Ledger::Runners::Prompts)
   end
 
-  it 'returns write_prompt_record as runner_function' do
-    expect(actor.runner_function).to eq('write_prompt_record')
+  it 'returns insert as runner_function' do
+    expect(actor.runner_function).to eq('insert')
   end
 
   it 'returns false for use_runner?' do

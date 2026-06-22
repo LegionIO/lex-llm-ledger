@@ -37,6 +37,7 @@ module Legion
 
               { result: write_result[0] }
             rescue Sequel::UniqueConstraintViolation => e
+              handle_exception(e, level: :debug, handled: true, operation: 'tool_persistence.write_tool_record_race')
               log.warn("write_tool_record duplicate insert ignored: #{e.message}")
               { result: :duplicate }
             end
@@ -128,7 +129,8 @@ module Legion
                                     inserted_at:                   Time.now.utc
                                   }, operation: 'tool_persistence.tool_call')
               [llm_tool_call_model[id], true]
-            rescue Sequel::UniqueConstraintViolation
+            rescue Sequel::UniqueConstraintViolation => e
+              handle_exception(e, level: :debug, handled: true, operation: 'tool_persistence.tool_call_race')
               row = llm_tool_call_model.first(uuid: tool_uuid)
               raise unless row
 
@@ -173,7 +175,8 @@ module Legion
                                     inserted_at:         Time.now.utc
                                   }, operation: 'tool_persistence.attempt')
               llm_tool_call_attempt_model[id]
-            rescue Sequel::UniqueConstraintViolation
+            rescue Sequel::UniqueConstraintViolation => e
+              handle_exception(e, level: :debug, handled: true, operation: 'tool_persistence.attempt_race')
               llm_tool_call_attempt_model.first(uuid: attempt_uuid) || raise
             end
 

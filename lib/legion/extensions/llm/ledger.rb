@@ -45,7 +45,6 @@ if defined?(Legion::Extensions) && Legion::Extensions.const_defined?(:Core, fals
   require_relative 'ledger/actors/registry_availability'
   require_relative 'ledger/actors/retention_purge'
   require_relative 'ledger/actors/reconciliation'
-  require_relative 'ledger/actors/spool_flush'
 end
 
 module Legion
