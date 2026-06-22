@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require 'legion/logging'
-require_relative '../../lib/legion/extensions/llm/ledger/helpers/stable_identifiers'
+require 'legion/extensions/llm/ledger/helpers/stable_identifiers'
 
 RSpec.describe Legion::Extensions::Llm::Ledger::Helpers::StableIdentifiers do
   describe '.stable_uuid' do

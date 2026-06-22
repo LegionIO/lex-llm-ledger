@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require 'legion/logging'
-require_relative '../../lib/legion/extensions/llm/ledger/helpers/request_refs'
+require 'legion/extensions/llm/ledger/helpers/request_refs'
 
 RSpec.describe Legion::Extensions::Llm::Ledger::Helpers::RequestRefs do
   describe '.request_ref' do
