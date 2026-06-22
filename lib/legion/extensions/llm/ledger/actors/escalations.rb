@@ -15,9 +15,7 @@ module Legion
 
             def runner_class = Legion::Extensions::Llm::Ledger::Runners::Escalations
 
-            def runner_function
-              'write_escalation_record'
-            end
+            def runner_function = 'insert'
 
             def use_runner?
               false

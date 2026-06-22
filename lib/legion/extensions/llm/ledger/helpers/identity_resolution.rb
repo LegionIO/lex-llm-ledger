@@ -54,8 +54,8 @@ module Legion
             # Resolve caller identity references (principal_id and identity_id) from a body.
             # Checks for explicit IDs first, then resolves through the descriptor chain.
             # Memoized on body[:__ledger_caller_identity_refs] for idempotency.
-            def caller_identity_refs(db, body)
-              body[:__ledger_caller_identity_refs] ||= resolve_refs(db, body)
+            def caller_identity_refs(body)
+              body[:__ledger_caller_identity_refs] ||= resolve_refs(body)
             end
 
             # Extract the canonical identity name string from a body.
@@ -80,10 +80,10 @@ module Legion
             end
 
             # Check if the identity tables (providers, principals, identities) exist.
-            def identity_tables_available?(db)
-              db.table_exists?(:identity_providers) &&
-                db.table_exists?(:identity_principals) &&
-                db.table_exists?(:identities)
+            def identity_tables_available?
+              !Legion::Data::Model::Identity::Provider.dataset.nil? &&
+                !Legion::Data::Model::Identity::Principal.dataset.nil? &&
+                !Legion::Data::Model::Identity::Identity.dataset.nil?
             end
 
             # Parse a raw identity string into a structured descriptor.
@@ -108,15 +108,15 @@ module Legion
 
             # Resolve an identity through the IDENTITY_TRIAD (provider → principal → identity).
             # Returns { principal_id: ..., identity_id: ... } or {} if not resolvable.
-            def resolve_identity(db, body)
-              return {} unless identity_tables_available?(db)
+            def resolve_identity(body)
+              return {} unless identity_tables_available?
 
               descriptor = parsed_identity_descriptor(body)
               return {} unless IdentityUtils.present?(descriptor[:canonical_name])
 
-              provider = find_or_create_identity_provider(db, descriptor[:provider_name])
-              principal = find_or_create_identity_principal(db, descriptor)
-              identity = find_or_create_identity(db, principal, provider, descriptor)
+              provider = find_or_create_identity_provider(descriptor[:provider_name])
+              principal = find_or_create_identity_principal(descriptor)
+              identity = find_or_create_identity(principal, provider, descriptor)
 
               { principal_id: principal[:id], identity_id: identity[:id] }
             rescue StandardError => e
@@ -125,51 +125,51 @@ module Legion
             end
 
             # Lookup helpers using Legion::Data::Model::Identity models.
-            def find_or_create_identity_provider(db, provider_name)
-              existing = ::Legion::Data::Model::Identity::Provider.first(name: provider_name)
+            def find_or_create_identity_provider(provider_name)
+              existing = Legion::Data::Model::Identity::Provider.first(name: provider_name)
               return existing if existing
 
-              insert_provider_with_savepoint(db, provider_name)
+              insert_provider_with_savepoint(provider_name)
             rescue Sequel::UniqueConstraintViolation => e
               handle_exception(e, level: :debug, handled: true, operation: 'identity_resolution.provider_race')
-              ::Legion::Data::Model::Identity::Provider.first(name: provider_name)
+              Legion::Data::Model::Identity::Provider.first(name: provider_name)
             end
 
-            def find_or_create_identity_principal(db, descriptor)
-              existing = ::Legion::Data::Model::Identity::Principal.first(
+            def find_or_create_identity_principal(descriptor)
+              existing = Legion::Data::Model::Identity::Principal.first(
                 canonical_name: descriptor[:canonical_name],
                 kind:           descriptor[:kind]
               )
               return existing if existing
 
-              insert_principal_with_savepoint(db, descriptor)
+              insert_principal_with_savepoint(descriptor)
             rescue Sequel::UniqueConstraintViolation => e
               handle_exception(e, level: :debug, handled: true, operation: 'identity_resolution.principal_race')
-              ::Legion::Data::Model::Identity::Principal.first(
+              Legion::Data::Model::Identity::Principal.first(
                 canonical_name: descriptor[:canonical_name],
                 kind:           descriptor[:kind]
               )
             end
 
-            def find_or_create_identity(db, principal, provider, descriptor)
-              existing = ::Legion::Data::Model::Identity::Identity.first(
+            def find_or_create_identity(principal, provider, descriptor)
+              existing = Legion::Data::Model::Identity::Identity.first(
                 principal_id:          principal[:id],
                 provider_id:           provider[:id],
                 provider_identity_key: descriptor[:provider_identity_key]
               )
               return existing if existing
 
-              insert_identity_with_savepoint(db, principal, provider, descriptor)
+              insert_identity_with_savepoint(principal, provider, descriptor)
             rescue Sequel::UniqueConstraintViolation => e
               handle_exception(e, level: :debug, handled: true, operation: 'identity_resolution.identity_race')
-              ::Legion::Data::Model::Identity::Identity.first(
+              Legion::Data::Model::Identity::Identity.first(
                 principal_id:          principal[:id],
                 provider_id:           provider[:id],
                 provider_identity_key: descriptor[:provider_identity_key]
               )
             end
 
-            def insert_provider_with_savepoint(db, provider_name)
+            def insert_provider_with_savepoint(provider_name)
               attrs = {
                 uuid:          deterministic_uuid("identity_provider:#{provider_name}"),
                 name:          provider_name,
@@ -179,10 +179,10 @@ module Legion
                 created_at:    Time.now.utc,
                 updated_at:    Time.now.utc
               }
-              db[:identity_providers].insert(**attrs)
+              Legion::Data::Model::Identity::Provider.create(attrs)
             end
 
-            def insert_principal_with_savepoint(db, descriptor)
+            def insert_principal_with_savepoint(descriptor)
               attrs = {
                 uuid:           deterministic_uuid("identity_principal:#{descriptor[:kind]}:#{descriptor[:canonical_name]}"),
                 canonical_name: descriptor[:canonical_name],
@@ -192,10 +192,10 @@ module Legion
                 created_at:     Time.now.utc,
                 updated_at:     Time.now.utc
               }
-              db[:identity_principals].insert(**attrs)
+              Legion::Data::Model::Identity::Principal.create(attrs)
             end
 
-            def insert_identity_with_savepoint(db, principal, provider, descriptor)
+            def insert_identity_with_savepoint(principal, provider, descriptor)
               attrs = {
                 uuid:                  deterministic_uuid(
                   "identity:#{principal[:id]}:#{provider[:id]}:#{descriptor[:provider_identity_key]}"
@@ -209,7 +209,7 @@ module Legion
                 created_at:            Time.now.utc,
                 updated_at:            Time.now.utc
               }
-              db[:identities].insert(**attrs)
+              Legion::Data::Model::Identity::Identity.create(attrs)
             end
 
             private_class_method :insert_provider_with_savepoint,
@@ -229,7 +229,7 @@ module Legion
               external:    :external
             }.freeze
 
-            def resolve_refs(db, body)
+            def resolve_refs(body)
               explicit_identity_id = IdentityUtils.integer_or_nil(body[:caller_identity_id] || body.dig(:caller, :requested_by, :id))
               explicit_principal_id = IdentityUtils.integer_or_nil(body[:caller_principal_id] ||
                                                      body.dig(:caller, :requested_by, :principal_id))
@@ -239,12 +239,12 @@ module Legion
 
               refs = { principal_id: explicit_principal_id, identity_id: explicit_identity_id }.compact
               unless refs[:principal_id] && refs[:identity_id]
-                if explicit_identity_id && !explicit_principal_id && identity_tables_available?(db)
-                  row = db[:identities].where(id: explicit_identity_id).first
+                if explicit_identity_id && !explicit_principal_id && identity_tables_available?
+                  row = Legion::Data::Model::Identity::Identity[explicit_identity_id]
                   refs[:principal_id] = row[:principal_id] if row
                 end
 
-                resolved = resolve_identity(db, body)
+                resolved = resolve_identity(body)
                 refs[:principal_id] ||= resolved[:principal_id]
                 refs[:identity_id] ||= resolved[:identity_id]
               end

@@ -15,9 +15,7 @@ module Legion
 
             def runner_class = Legion::Extensions::Llm::Ledger::Runners::RegistryAvailability
 
-            def runner_function
-              'write_registry_availability_record'
-            end
+            def runner_function = 'insert'
 
             def use_runner?
               false

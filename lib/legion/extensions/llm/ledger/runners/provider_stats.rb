@@ -25,7 +25,10 @@ module Legion
                    )
                    .all
 
-              ds.map { |row| row.merge(status: Helpers::Queries.latency_status(row[:avg_latency_ms])) }
+              ds.map do |row|
+                attrs = row.respond_to?(:to_h) ? row.to_h : row.values
+                attrs.merge(status: Helpers::Queries.latency_status(row[:avg_latency_ms]))
+              end
             end
 
             def circuit_summary(period: 'hour')
@@ -71,9 +74,10 @@ module Legion
 
             def official_metrics
               metric = Sequel[:llm_message_inference_metrics]
-              ::Legion::Data.connection[:llm_message_inference_metrics]
-                            .join(:llm_message_inference_requests, id: metric[:message_inference_request_id])
-                            .join(:llm_message_inference_responses, id: metric[:message_inference_response_id])
+              Legion::Data::Models::LLM::MessageInferenceMetric.dataset
+                                                               .naked
+                                                               .join(:llm_message_inference_requests, id: metric[:message_inference_request_id])
+                                                               .join(:llm_message_inference_responses, id: metric[:message_inference_response_id])
             end
           end
         end

@@ -21,17 +21,17 @@ module Legion
 
               body = official_metering_payload(payload, ctx, props, headers)
               body.merge!(official_identity_payload(body, headers))
-              Helpers::LifecyclePersistence.write_metering(::Legion::Data.connection, body)
+              Helpers::LifecyclePersistence.write_metering(body)
             end
 
             # Look up a metric by request reference.
             def find(request_ref:, **_opts)
               return { result: :not_found } unless request_ref
 
-              request = ::Legion::Data::Models::LLM::MessageInferenceRequest.lookup(request_ref)
+              request = Legion::Data::Models::LLM::MessageInferenceRequest.lookup(request_ref)
               return { result: :not_found } unless request
 
-              metric = ::Legion::Data::Models::LLM::MessageInferenceMetric
+              metric = Legion::Data::Models::LLM::MessageInferenceMetric
                        .first(message_inference_request_id: request[:id])
               return { result: :not_found } unless metric
 

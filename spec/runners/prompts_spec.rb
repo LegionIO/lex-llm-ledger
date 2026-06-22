@@ -47,10 +47,10 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Prompts do
       result = described_class.insert(payload: decrypted_body, metadata: metadata)
       expect(result).to include(result: :ok)
 
-      conversation = Legion::Data.connection[:llm_conversations].first
-      request = Legion::Data.connection[:llm_message_inference_requests].first
-      response = Legion::Data.connection[:llm_message_inference_responses].first
-      metric = Legion::Data.connection[:llm_message_inference_metrics].first
+      conversation = Legion::Data::Models::LLM::Conversation.first
+      request = Legion::Data::Models::LLM::MessageInferenceRequest.first
+      response = Legion::Data::Models::LLM::MessageInferenceResponse.first
+      metric = Legion::Data::Models::LLM::MessageInferenceMetric.first
 
       expect(conversation[:uuid]).to eq('conv_123')
       expect(request[:request_ref]).to eq('req_abc')
@@ -67,8 +67,8 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Prompts do
 
     it 'stores request, visible response, and thinking as structured JSON' do
       described_class.insert(payload: decrypted_body, metadata: metadata)
-      request = Legion::Data.connection[:llm_message_inference_requests].first
-      response = Legion::Data.connection[:llm_message_inference_responses].first
+      request = Legion::Data::Models::LLM::MessageInferenceRequest.first
+      response = Legion::Data::Models::LLM::MessageInferenceResponse.first
 
       parsed_request = JSON.parse(request[:request_json])
       expect(parsed_request['system']).to eq('You are a helpful assistant.')
@@ -83,7 +83,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Prompts do
       result = described_class.insert(payload: decrypted_body, metadata: metadata)
 
       expect(result).to include(result: :ok)
-      request = Legion::Data.connection[:llm_message_inference_requests].first
+      request = Legion::Data::Models::LLM::MessageInferenceRequest.first
       expect(request[:request_ref]).to eq('req_abc')
       expect(request[:correlation_id]).to eq('req_abc')
     end
@@ -93,29 +93,29 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Prompts do
       result = described_class.insert(payload: decrypted_body, metadata: metadata)
 
       expect(result).to include(result: :ok)
-      expect(Legion::Data.connection[:llm_message_inference_requests].count).to eq(1)
-      expect(Legion::Data.connection[:llm_message_inference_responses].count).to eq(1)
-      expect(Legion::Data.connection[:llm_message_inference_metrics].count).to eq(1)
+      expect(Legion::Data::Models::LLM::MessageInferenceRequest.count).to eq(1)
+      expect(Legion::Data::Models::LLM::MessageInferenceResponse.count).to eq(1)
+      expect(Legion::Data::Models::LLM::MessageInferenceMetric.count).to eq(1)
     end
 
     it 'sets contains_phi true from header' do
       metadata[:headers]['x-legion-contains-phi'] = 'true'
       described_class.insert(payload: decrypted_body, metadata: metadata)
-      row = Legion::Data.connection[:llm_conversations].first
+      row = Legion::Data::Models::LLM::Conversation.first
       expect(row[:contains_phi]).to be true
     end
 
     it 'applies PHI TTL cap when PHI flagged' do
       metadata[:headers]['x-legion-contains-phi'] = 'true'
       described_class.insert(payload: decrypted_body, metadata: metadata)
-      row = Legion::Data.connection[:llm_conversations].first
+      row = Legion::Data::Models::LLM::Conversation.first
       expect(row[:expires_at]).not_to be_nil
     end
 
     it 'sets nil expires_at for permanent non-PHI' do
       metadata[:headers]['x-legion-retention'] = 'permanent'
       described_class.insert(payload: decrypted_body, metadata: metadata)
-      row = Legion::Data.connection[:llm_conversations].first
+      row = Legion::Data::Models::LLM::Conversation.first
       expect(row[:expires_at]).to be_nil
     end
 
@@ -161,7 +161,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Prompts do
       it 'extracts thinking from inline tags into response_thinking_json' do
         described_class.insert(payload: inline_thinking_body, metadata: metadata)
 
-        response = Legion::Data.connection[:llm_message_inference_responses].first
+        response = Legion::Data::Models::LLM::MessageInferenceResponse.first
         thinking_json = JSON.parse(response[:response_thinking_json])
         response_json = JSON.parse(response[:response_json])
 

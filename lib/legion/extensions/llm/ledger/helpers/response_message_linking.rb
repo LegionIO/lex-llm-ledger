@@ -14,11 +14,11 @@ module Legion
 
             module_function
 
-            def response_message_linking_link_response_message!(db, response_message, response)
+            def response_message_linking_link_response_message!(response_message, response)
               return unless response_message && response
               return if response_message[:message_inference_response_id] == response[:id]
 
-              db[:llm_messages].where(id: response_message[:id]).update(message_inference_response_id: response[:id])
+              response_message.update(message_inference_response_id: response[:id])
             end
           end
         end

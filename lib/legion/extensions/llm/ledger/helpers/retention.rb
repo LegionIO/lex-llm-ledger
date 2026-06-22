@@ -29,9 +29,10 @@ module Legion
             end
 
             def expired_ids(table)
-              ::Legion::Data.connection[table]
-                            .where { expires_at <= Time.now.utc }
-                            .select_map(:id)
+              Legion::Data::Models::LLM::Conversation.dataset
+                                                     .from(table)
+                                                     .where { expires_at <= Time.now.utc }
+                                                     .select_map(:id)
             end
 
             def days_for_label(label)

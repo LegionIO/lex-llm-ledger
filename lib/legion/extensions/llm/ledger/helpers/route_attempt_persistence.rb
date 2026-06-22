@@ -28,7 +28,7 @@ module Legion
             extend Legion::Logging::Helper
             extend StableIdentifiers
 
-            def write_route_attempts(db, request, response, body)
+            def write_route_attempts(request, response, body)
               attempts = Array(body[:route_attempt_details])
               return if attempts.empty?
 
@@ -38,10 +38,10 @@ module Legion
                 attempt_no = (attempt[:attempt_no] || (idx + 1)).to_i
                 uuid = stable_uuid("#{request[:uuid]}:attempt:#{attempt_no}")
 
-                existing = db[:llm_route_attempts].where(uuid: uuid).first
+                existing = Legion::Data::Models::LLM::RouteAttempt.first(uuid: uuid)
                 next if existing
 
-                persist_insert(db, :llm_route_attempts, {
+                persist_insert({
                                  uuid:                          uuid,
                                  message_inference_request_id:  request[:id],
                                  message_inference_response_id: response[:id],
@@ -58,8 +58,8 @@ module Legion
                                  idempotency_key:               attempt[:idempotency_key],
                                  started_at:                    attempt[:started_at],
                                  ended_at:                      attempt[:ended_at],
-                                 identity_principal_id:         resolve_identity_principal_id(db, body),
-                                 identity_id:                   resolve_identity_id(db, body),
+                                 identity_principal_id:         resolve_identity_principal_id(body),
+                                 identity_id:                   resolve_identity_id(body),
                                  identity_canonical_name:       identity_canonical_name(body),
                                  inserted_at:                   Time.now.utc
                                }, operation: 'route_attempt_persistence.insert')
@@ -70,19 +70,24 @@ module Legion
 
             private
 
-            def persist_insert(db, table, attrs, operation:)
-              Helpers::PersistenceLogging.insert_row(db, table, attrs, operation: operation, warn_on_unique: false)
+            def persist_insert(attrs, operation:)
+              Helpers::PersistenceLogging.insert_model(
+                model_class:    Legion::Data::Models::LLM::RouteAttempt,
+                attributes:     attrs,
+                operation:      operation,
+                warn_on_unique: false
+              )
             end
 
-            def resolve_identity_principal_id(db, body)
-              Helpers::IdentityResolution.caller_identity_refs(db, body)[:principal_id]
+            def resolve_identity_principal_id(body)
+              Helpers::IdentityResolution.caller_identity_refs(body)[:principal_id]
             rescue StandardError => e
               handle_exception(e, level: :warn, handled: true, operation: 'route_attempt.identity_principal')
               nil
             end
 
-            def resolve_identity_id(db, body)
-              Helpers::IdentityResolution.caller_identity_refs(db, body)[:identity_id]
+            def resolve_identity_id(body)
+              Helpers::IdentityResolution.caller_identity_refs(body)[:identity_id]
             rescue StandardError => e
               handle_exception(e, level: :warn, handled: true, operation: 'route_attempt.identity')
               nil

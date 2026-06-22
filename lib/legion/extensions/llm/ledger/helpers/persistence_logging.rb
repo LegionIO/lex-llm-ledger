@@ -19,26 +19,43 @@ module Legion
 
             module_function
 
-            def insert_row(db, table, attributes, operation:, warn_on_unique: true)
-              row_id = db[table].insert(attributes)
-              log.info(log_message('inserted', table, operation, row_id, attributes))
-              row_id
+            def insert_model(model_class:, attributes:, operation:, warn_on_unique: true)
+              record = model_class.create(attributes)
+              log.info(log_message('inserted', model_class.table_name, operation, record[:id], attributes))
+              record[:id]
             rescue Sequel::UniqueConstraintViolation => e
               if warn_on_unique
-                log.warn(log_message('insert_failed', table, operation, nil, attributes,
+                log.warn(log_message('insert_failed', model_class.table_name, operation, nil, attributes,
                                      error_class: e.class, error: e.message))
               end
               raise
             rescue StandardError => e
-              log.error(log_message('insert_failed', table, operation, nil, attributes,
+              log.error(log_message('insert_failed', model_class.table_name, operation, nil, attributes,
                                     error_class: e.class, error: e.message))
-              handle_exception(e, level: :error, handled: true, operation: operation, table: table)
+              handle_exception(e, level: :error, handled: true, operation: operation, table: model_class.table_name)
+              raise
+            end
+
+            def insert_dataset(relation:, attributes:, operation:, warn_on_unique: true)
+              row_id = relation.insert(attributes)
+              log.info(log_message('inserted', relation.first_source, operation, row_id, attributes))
+              row_id
+            rescue Sequel::UniqueConstraintViolation => e
+              if warn_on_unique
+                log.warn(log_message('insert_failed', relation.first_source, operation, nil, attributes,
+                                     error_class: e.class, error: e.message))
+              end
+              raise
+            rescue StandardError => e
+              log.error(log_message('insert_failed', relation.first_source, operation, nil, attributes,
+                                    error_class: e.class, error: e.message))
+              handle_exception(e, level: :error, handled: true, operation: operation, table: relation.first_source)
               raise
             end
 
             def log_message(action, table, operation, row_id, attributes, error_class: nil, error: nil)
               parts = {
-                action:      "ledger.db.#{action}",
+                action:      "ledger.persistence.#{action}",
                 table:       table,
                 operation:   operation,
                 row_id:      row_id,

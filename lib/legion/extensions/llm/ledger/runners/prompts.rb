@@ -34,7 +34,7 @@ module Legion
               body.merge!(official_routing_payload(body, headers))
               body.merge!(official_compliance_payload(body, headers, expires_at))
 
-              Helpers::LifecyclePersistence.write_prompt(::Legion::Data.connection, body)
+              Helpers::LifecyclePersistence.write_prompt(body)
             rescue Helpers::DecryptionUnavailable => e
               handle_exception(e, level: :warn, handled: true, operation: 'prompts.insert.decrypt')
               raise
@@ -47,11 +47,9 @@ module Legion
             def link(response_message_id:, response_id:, **_opts)
               return { result: :ok } unless response_message_id && response_id
 
-              db = ::Legion::Data.connection
               Helpers::ResponseMessageLinking.response_message_linking_link_response_message!(
-                db,
-                db[:llm_messages][response_message_id],
-                db[:llm_message_inference_responses][response_id]
+                Legion::Data::Models::LLM::Message[response_message_id],
+                Legion::Data::Models::LLM::MessageInferenceResponse[response_id]
               )
               { result: :ok }
             rescue StandardError => e

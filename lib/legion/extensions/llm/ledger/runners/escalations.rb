@@ -3,6 +3,7 @@
 require 'digest'
 require 'securerandom'
 require_relative '../helpers/caller_identity'
+require_relative '../helpers/decryption'
 require_relative '../helpers/json'
 require_relative '../helpers/persistence_logging'
 
@@ -14,42 +15,39 @@ module Legion
           module Escalations
             extend self
 
-            def write_escalation_record(payload = nil, metadata = {}, **message)
-              payload, metadata = normalize_runner_args(payload, metadata, message)
+            def insert(payload:, metadata: {}, **_opts)
               headers = Helpers::SubscriptionMessage.extract_headers(payload, metadata)
               props   = metadata[:properties] || {}
 
               body = payload.is_a?(Hash) ? payload : Helpers::Decryption.decrypt_if_needed(payload, metadata)
 
-              db = ::Legion::Data.connection
-              record = build_escalation_record(db, body, props, headers)
+              record = build_escalation_record(body, props, headers)
 
-              Helpers::PersistenceLogging.insert_row(
-                db, :llm_escalation_events, record,
-                operation: 'write_escalation_record'
+              Helpers::PersistenceLogging.insert_dataset(
+                relation:   Legion::Data::Models::LLM::Conversation.dataset.from(:llm_escalation_events),
+                attributes: record,
+                operation:  'escalations.insert'
               )
               { result: :ok }
             rescue Sequel::UniqueConstraintViolation => e
-              log.warn("write_escalation_record duplicate insert ignored: #{e.message}")
+              handle_exception(e, level: :debug, handled: true, operation: 'escalations.insert_race')
               { result: :duplicate }
             rescue Helpers::DecryptionUnavailable => e
-              handle_exception(e, level: :warn, handled: true, operation: 'write_escalation_record.decrypt')
+              handle_exception(e, level: :warn, handled: true, operation: 'escalations.insert.decrypt')
               raise
             rescue Helpers::DecryptionFailed => e
-              handle_exception(e, level: :error, handled: true, operation: 'write_escalation_record.decrypt')
+              handle_exception(e, level: :error, handled: true, operation: 'escalations.insert.decrypt')
               raise
             rescue StandardError => e
-              handle_exception(e, level: :error, handled: true, operation: 'write_escalation_record')
-              { result: :error, error: e.message }
+              handle_exception(e, level: :error, handled: true, operation: 'escalations.insert')
+              raise
             end
+
+            alias write_escalation_record insert
 
             private
 
-            def normalize_runner_args(payload, metadata, message)
-              Helpers::SubscriptionMessage.runner_args(payload, metadata, message)
-            end
-
-            def build_escalation_record(db, body, props, headers)
+            def build_escalation_record(body, props, headers)
               history = Array(body[:history])
               identity = Helpers::CallerIdentity.normalize(
                 caller_raw: body[:caller], identity: body[:identity], headers: headers
@@ -60,7 +58,7 @@ module Legion
 
               {
                 uuid:                    stable_uuid(props[:message_id] || body[:event_id] || SecureRandom.uuid),
-                conversation_id:         resolve_conversation_id(db, body, headers),
+                conversation_id:         resolve_conversation_id(body, headers),
                 request_ref:             body[:request_id] || props[:correlation_id],
                 from_provider:           first_attempt[:provider] || body[:from_provider],
                 from_instance:           first_attempt[:instance] || body[:from_instance],
@@ -83,12 +81,12 @@ module Legion
               }.compact
             end
 
-            def resolve_conversation_id(db, body, headers)
+            def resolve_conversation_id(body, headers)
               conv_ref = body[:conversation_id] || headers['x-legion-llm-conversation-id']
               return nil unless conv_ref # rubocop:disable Legion/Extension/RunnerReturnHash
 
-              conv = db[:llm_conversations].where(uuid: stable_uuid(conv_ref)).first ||
-                     db[:llm_conversations].where(uuid: conv_ref).first
+              conv = Legion::Data::Models::LLM::Conversation.first(uuid: stable_uuid(conv_ref)) ||
+                     Legion::Data::Models::LLM::Conversation.first(uuid: conv_ref)
               conv&.[](:id)
             end
 

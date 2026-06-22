@@ -82,9 +82,9 @@ module Legion
             end
 
             def official_metrics
-              ::Legion::Data.connection[:llm_message_inference_metrics]
-                            .join(:llm_message_inference_requests, id: metric[:message_inference_request_id])
-                            .join(:llm_message_inference_responses, id: metric[:message_inference_response_id])
+              Legion::Data::Models::LLM::MessageInferenceMetric.dataset
+                                                               .join(:llm_message_inference_requests, id: metric[:message_inference_request_id])
+                                                               .join(:llm_message_inference_responses, id: metric[:message_inference_response_id])
             end
 
             def group_column(name)

@@ -15,27 +15,21 @@ module Legion
             LOOKBACK_SECONDS = 300
 
             def link_orphaned_tool_calls
-              db = ::Legion::Data.connection
               linked = 0
 
-              orphans = db[:llm_tool_calls]
+              orphans = Legion::Data::Models::LLM::ToolCall
                         .where(message_inference_response_id: nil)
                         .where { inserted_at >= Time.now.utc - LOOKBACK_SECONDS }
                         .limit(BATCH_SIZE)
                         .all
 
               orphans.each do |tool_call|
-                response = find_response_for_tool_call(db, tool_call)
+                response = find_response_for_tool_call(tool_call)
                 next unless response
 
-                # Recalculate tool_call_index to avoid unique constraint collisions.
-                # Orphaned tool calls were inserted with index 0 (no response known),
-                # but the response may already have tool calls at those indices.
-                next_index = db[:llm_tool_calls]
-                             .where(message_inference_response_id: response[:id])
-                             .max(:tool_call_index).to_i + 1
+                next_index = response.tool_calls_dataset.max(:tool_call_index).to_i + 1
 
-                db[:llm_tool_calls].where(id: tool_call[:id]).update(
+                tool_call.update(
                   message_inference_response_id: response[:id],
                   tool_call_index:               next_index
                 )
@@ -50,10 +44,9 @@ module Legion
             end
 
             def link_metering_messages
-              db = ::Legion::Data.connection
               linked = 0
 
-              requests_without_messages = db[:llm_message_inference_requests]
+              requests_without_messages = Legion::Data::Models::LLM::MessageInferenceRequest
                                           .where(latest_message_id: nil)
                                           .where { inserted_at >= Time.now.utc - LOOKBACK_SECONDS }
                                           .limit(BATCH_SIZE)
@@ -62,15 +55,13 @@ module Legion
               requests_without_messages.each do |request|
                 next unless request[:conversation_id]
 
-                message = db[:llm_messages]
-                          .where(conversation_id: request[:conversation_id])
-                          .order(Sequel.desc(:seq))
-                          .first
+                conversation = request.conversation
+                next unless conversation
+
+                message = conversation.messages_dataset.order(Sequel.desc(:seq)).first
                 next unless message
 
-                db[:llm_message_inference_requests]
-                  .where(id: request[:id])
-                  .update(latest_message_id: message[:id])
+                request.update(latest_message_id: message[:id])
                 linked += 1
               end
 
@@ -83,18 +74,16 @@ module Legion
 
             private
 
-            def find_response_for_tool_call(db, tool_call)
+            def find_response_for_tool_call(tool_call)
               return nil unless tool_call[:conversation_id] # rubocop:disable Legion/Extension/RunnerReturnHash
 
-              request = db[:llm_message_inference_requests]
+              request = Legion::Data::Models::LLM::MessageInferenceRequest
                         .where(conversation_id: tool_call[:conversation_id])
                         .order(Sequel.desc(:inserted_at))
                         .first
               return nil unless request # rubocop:disable Legion/Extension/RunnerReturnHash
 
-              db[:llm_message_inference_responses]
-                .where(message_inference_request_id: request[:id])
-                .first
+              request.message_inference_responses_dataset.first
             end
           end
         end

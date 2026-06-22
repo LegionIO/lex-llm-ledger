@@ -21,7 +21,7 @@ module Legion
 
             # --- Response Enrichment —
 
-            def enrich_response!(db, existing, response_message, body)
+            def enrich_response!(existing, response_message, body)
               updates = {}
               update_if_missing(updates, existing, :response_message_id, response_message&.[](:id))
               update_if_missing(updates, existing, :tier, tier(body))
@@ -45,14 +45,14 @@ module Legion
 
               return existing if updates.empty?
 
-              db[:llm_message_inference_responses].where(id: existing[:id]).update(updates)
+              existing.update(updates)
               log.info("[ledger] enriched response id=#{existing[:id]} fields=#{updates.keys.join(',')}")
               existing
             end
 
             # --- Request Enrichment —
 
-            def enrich_request!(db, existing, body, latest_message = nil)
+            def enrich_request!(existing, body, latest_message = nil)
               updates = {}
               update_if_missing(updates, existing, :latest_message_id, latest_message&.[](:id))
               update_if_missing(updates, existing, :runtime_caller_class, runtime_caller_class(body))
@@ -65,14 +65,14 @@ module Legion
 
               return existing if updates.empty?
 
-              db[:llm_message_inference_requests].where(id: existing[:id]).update(updates)
+              existing.update(updates)
               log.info("[ledger] enriched request id=#{existing[:id]} fields=#{updates.keys.join(',')}")
               existing
             end
 
             # --- Metric Context Accounting Enrichment —
 
-            def enrich_metric_context_accounting!(db, existing, body)
+            def enrich_metric_context_accounting!(existing, body)
               incoming = context_accounting(body)
               return if incoming.empty?
 
@@ -108,7 +108,7 @@ module Legion
                 context_accounting_status:             incoming_status,
                 context_accounting_json:               storage_json_dump(incoming)
               }
-              db[:llm_message_inference_metrics].where(id: existing[:id]).update(updates)
+              existing.update(updates)
               log.info("[ledger] enriched metric context_accounting id=#{existing[:id]} status=#{incoming_status}")
             rescue StandardError => e
               handle_exception(e, level: :warn, handled: true, operation: 'lifecycle_enrichment.context_accounting')
@@ -331,7 +331,7 @@ module Legion
 
             # --- Resolve Parent Request —
 
-            def resolve_parent_request_id(_db, body)
+            def resolve_parent_request_id(body)
               parent_ref = body[:parent_request_id] || body.dig(:context, :parent_request_id) || body.dig(:caller, :parent_request_ref)
               return nil unless present?(parent_ref)
 
@@ -419,12 +419,8 @@ module Legion
             # --- Thinking Extraction —
 
             def extract_inline_thinking(text)
-              if defined?(::Legion::Extensions::Llm::Responses::ThinkingExtractor)
-                extraction = ::Legion::Extensions::Llm::Responses::ThinkingExtractor.extract(text)
-                [extraction.content, extraction.thinking]
-              else
-                [text, nil]
-              end
+              extraction = Legion::Extensions::Llm::Responses::ThinkingExtractor.extract(text)
+              [extraction.content, extraction.thinking]
             end
 
             # --- Identity Descriptor (delegates to IdentityResolution) —

@@ -50,9 +50,9 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Metering do
       result = described_class.insert(payload: payload, metadata: metadata)
       expect(result).to include(result: :ok)
 
-      request = Legion::Data.connection[:llm_message_inference_requests].first
-      response = Legion::Data.connection[:llm_message_inference_responses].first
-      metric = Legion::Data.connection[:llm_message_inference_metrics].first
+      request = Legion::Data::Models::LLM::MessageInferenceRequest.first
+      response = Legion::Data::Models::LLM::MessageInferenceResponse.first
+      metric = Legion::Data::Models::LLM::MessageInferenceMetric.first
 
       expect(request[:request_ref]).to eq('req_abc')
       expect(request[:operation]).to eq('chat')
@@ -75,7 +75,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Metering do
       result = described_class.insert(payload: payload, metadata: metadata)
 
       expect(result).to include(result: :ok)
-      expect(Legion::Data.connection[:llm_message_inference_metrics].count).to eq(1)
+      expect(Legion::Data::Models::LLM::MessageInferenceMetric.count).to eq(1)
     end
 
     it 'handles nil billing block' do
@@ -83,7 +83,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Metering do
       result = described_class.insert(payload: payload, metadata: metadata)
       expect(result).to include(result: :ok)
 
-      row = Legion::Data.connection[:llm_message_inference_metrics].first
+      row = Legion::Data::Models::LLM::MessageInferenceMetric.first
       expect(row[:cost_center]).to be_nil
       expect(row[:budget_key]).to be_nil
     end
@@ -91,14 +91,14 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Metering do
     it 'stores zero thinking_tokens' do
       payload[:thinking_tokens] = 0
       described_class.insert(payload: payload, metadata: metadata)
-      row = Legion::Data.connection[:llm_message_inference_metrics].first
+      row = Legion::Data::Models::LLM::MessageInferenceMetric.first
       expect(row[:thinking_tokens]).to eq(0)
     end
 
     it 'converts nil token values to zero' do
       payload[:thinking_tokens] = nil
       described_class.insert(payload: payload, metadata: metadata)
-      row = Legion::Data.connection[:llm_message_inference_metrics].first
+      row = Legion::Data::Models::LLM::MessageInferenceMetric.first
       expect(row[:thinking_tokens]).to eq(0)
     end
 
@@ -293,7 +293,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Metering do
 
       it 'does not create route attempts for metering without route_attempt_details' do
         described_class.insert(payload: metering_payload, metadata: metering_metadata)
-        expect(Legion::Data.connection[:llm_route_attempts].count).to eq(0)
+        expect(Legion::Data::Models::LLM::RouteAttempt.count).to eq(0)
       end
     end
 

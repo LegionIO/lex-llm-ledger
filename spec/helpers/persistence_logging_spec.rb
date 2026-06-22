@@ -8,21 +8,21 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Helpers::PersistenceLogging do
   before do
     allow(described_class).to receive(:log).and_return(logger)
     allow(described_class).to receive(:handle_exception)
+    allow(dataset).to receive(:first_source).and_return(:llm_metering_records)
   end
 
   it 'logs successful row inserts at info with safe row context' do
     allow(dataset).to receive(:insert).and_return(42)
 
-    result = described_class.insert_row(
-      db,
-      :llm_metering_records,
-      { uuid: 'metric_uuid', request_json: '{"secret":"hidden"}' },
-      operation: 'write_metering_record'
+    result = described_class.insert_dataset(
+      relation:   dataset,
+      attributes: { uuid: 'metric_uuid', request_json: '{"secret":"hidden"}' },
+      operation:  'write_metering_record'
     )
 
     expect(result).to eq(42)
     expect(logger).to have_received(:info).with(include(
-                                                  'action=ledger.db.inserted',
+                                                  'action=ledger.persistence.inserted',
                                                   'table=llm_metering_records',
                                                   'operation=write_metering_record',
                                                   'row_id=42',
@@ -36,12 +36,12 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Helpers::PersistenceLogging do
     allow(dataset).to receive(:insert).and_raise(error)
 
     expect do
-      described_class.insert_row(db, :llm_metering_records, { uuid: 'metric_uuid' },
-                                 operation: 'write_metering_record')
+      described_class.insert_dataset(relation: dataset, attributes: { uuid: 'metric_uuid' },
+                                     operation: 'write_metering_record')
     end.to raise_error(Sequel::UniqueConstraintViolation)
 
     expect(logger).to have_received(:warn).with(include(
-                                                  'action=ledger.db.insert_failed',
+                                                  'action=ledger.persistence.insert_failed',
                                                   'table=llm_metering_records',
                                                   'operation=write_metering_record',
                                                   'error_class=Sequel::UniqueConstraintViolation',
@@ -54,8 +54,8 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Helpers::PersistenceLogging do
     allow(dataset).to receive(:insert).and_raise(error)
 
     expect do
-      described_class.insert_row(db, :llm_metering_records, { uuid: 'metric_uuid' },
-                                 operation: 'write_metering_record', warn_on_unique: false)
+      described_class.insert_dataset(relation: dataset, attributes: { uuid: 'metric_uuid' },
+                                     operation: 'write_metering_record', warn_on_unique: false)
     end.to raise_error(Sequel::UniqueConstraintViolation)
 
     expect(logger).not_to have_received(:warn)
@@ -66,12 +66,12 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Helpers::PersistenceLogging do
     allow(dataset).to receive(:insert).and_raise(error)
 
     expect do
-      described_class.insert_row(db, :llm_metering_records, { uuid: 'metric_uuid' },
-                                 operation: 'write_metering_record')
+      described_class.insert_dataset(relation: dataset, attributes: { uuid: 'metric_uuid' },
+                                     operation: 'write_metering_record')
     end.to raise_error(RuntimeError, /database down/)
 
     expect(logger).to have_received(:error).with(include(
-                                                   'action=ledger.db.insert_failed',
+                                                   'action=ledger.persistence.insert_failed',
                                                    'table=llm_metering_records',
                                                    'operation=write_metering_record',
                                                    'error_class=RuntimeError',

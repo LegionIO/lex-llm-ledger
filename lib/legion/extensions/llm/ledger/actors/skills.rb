@@ -15,9 +15,7 @@ module Legion
 
             def runner_class = Legion::Extensions::Llm::Ledger::Runners::Skills
 
-            def runner_function
-              'write_skill_record'
-            end
+            def runner_function = 'insert'
 
             def use_runner?
               false
