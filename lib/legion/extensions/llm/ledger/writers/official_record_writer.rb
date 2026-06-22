@@ -57,7 +57,7 @@ module Legion
 
             def find_or_create_conversation(db, body)
               uuid = stable_uuid(reference(body, :conversation_id, :conversation_ref) || 'default-conversation')
-              existing = db[:llm_conversations].where(uuid: uuid).first
+              existing = llm_conversation_model.first(uuid: uuid)
               return existing if existing
 
               id = insert_with_savepoint(db, :llm_conversations, {
@@ -76,10 +76,10 @@ module Legion
                                            created_at:              Time.now.utc,
                                            updated_at:              Time.now.utc
                                          }, operation: 'official_record_writer.conversation')
-              db[:llm_conversations][id: id]
+              llm_conversation_model[id]
             rescue Sequel::UniqueConstraintViolation => e
               log.debug("[ledger] conversation collision resolved uuid=#{uuid} error=#{e.class}")
-              existing = db[:llm_conversations].where(uuid: uuid).first
+              existing = llm_conversation_model.first(uuid: uuid)
               return existing if existing
 
               raise
@@ -87,7 +87,7 @@ module Legion
 
             def find_or_create_user_message(db, conversation, body)
               uuid = stable_uuid(reference(body, :message_id, :message_id_ctx) || "request-message:#{request_ref(body)}")
-              existing = db[:llm_messages].where(uuid: uuid).first
+              existing = llm_message_model.first(uuid: uuid)
               return existing if existing
 
               seq = body[:message_seq] ? integer(body[:message_seq]) : next_message_seq(db, conversation)
@@ -107,17 +107,17 @@ module Legion
                                              created_at:              recorded_at(body),
                                              inserted_at:             Time.now.utc
                                            }, operation: 'official_record_writer.user_message')
-                db[:llm_messages][id: id]
+                llm_message_model[id]
               rescue Sequel::UniqueConstraintViolation => e
                 log.debug("[ledger] seq collision resolved uuid=#{uuid} conversation_id=#{conversation[:id]} error=#{e.class}")
-                db[:llm_messages].where(uuid: uuid).first ||
-                  db[:llm_messages].where(conversation_id: conversation[:id], seq: seq).first
+                llm_message_model.first(uuid: uuid) ||
+                  llm_message_model.first(conversation_id: conversation[:id], seq: seq)
               end
             end
 
             def find_or_create_request(db, conversation, latest_message, body)
               request_id = request_ref(body)
-              existing = db[:llm_message_inference_requests].where(request_ref: request_id).first
+              existing = llm_request_model.lookup(request_id)
               return enrich_request!(db, existing, body, latest_message) if existing
 
               operation = operation(body)
@@ -125,7 +125,7 @@ module Legion
               id = insert_with_savepoint(db, :llm_message_inference_requests, {
                                            uuid:                    stable_uuid(request_id),
                                            conversation_id:         conversation[:id],
-                                           latest_message_id:       latest_message&.dig(:id),
+                                           latest_message_id:       latest_message&.[](:id),
                                            parent_request_id:       resolve_parent_request_id(db, body),
                                            caller_principal_id:     caller_refs[:principal_id],
                                            caller_identity_id:      caller_refs[:identity_id],
@@ -158,10 +158,10 @@ module Legion
                                            requested_at:            recorded_at(body),
                                            inserted_at:             Time.now.utc
                                          }, operation: 'official_record_writer.inference_request')
-              db[:llm_message_inference_requests][id: id]
+              llm_request_model[id]
             rescue Sequel::UniqueConstraintViolation => e
               log.debug("[ledger] request collision resolved request_ref=#{request_id} error=#{e.class}")
-              existing = db[:llm_message_inference_requests].where(request_ref: request_id).first
+              existing = llm_request_model.lookup(request_id)
               return enrich_request!(db, existing, body, latest_message) if existing
 
               raise
@@ -169,16 +169,16 @@ module Legion
 
             def find_or_create_response_message(db, conversation, request, body)
               uuid = stable_uuid(reference(body, :response_message_id) || "response-message:#{request_ref(body)}")
-              existing = db[:llm_messages].where(uuid: uuid).first
+              existing = llm_message_model.first(uuid: uuid)
               return existing if existing
 
-              latest = db[:llm_messages][id: request[:latest_message_id]]
-              seq = (latest&.dig(:seq) || 1) + 1
+              latest = llm_message_model[request[:latest_message_id]]
+              seq = (latest&.[](:seq) || 1) + 1
               begin
                 id = insert_with_savepoint(db, :llm_messages, {
                                              uuid:                         uuid,
                                              conversation_id:              conversation[:id],
-                                             parent_message_id:            latest&.dig(:id),
+                                             parent_message_id:            latest&.[](:id),
                                              message_inference_request_id: request[:id],
                                              seq:                          seq,
                                              role:                         'assistant',
@@ -192,25 +192,23 @@ module Legion
                                              created_at:                   recorded_at(body),
                                              inserted_at:                  Time.now.utc
                                            }, operation: 'official_record_writer.response_message')
-                db[:llm_messages][id: id]
+                llm_message_model[id]
               rescue Sequel::UniqueConstraintViolation => e
                 log.debug("[ledger] seq collision resolved uuid=#{uuid} conversation_id=#{conversation[:id]} error=#{e.class}")
-                db[:llm_messages].where(uuid: uuid).first ||
-                  db[:llm_messages].where(conversation_id: conversation[:id], seq: seq).first
+                llm_message_model.first(uuid: uuid) ||
+                  llm_message_model.first(conversation_id: conversation[:id], seq: seq)
               end
             end
 
             def find_or_create_response(db, request, response_message, body)
               response_uuid = stable_uuid(reference(body, :provider_response_ref) || "response:#{request_ref(body)}:#{body[:provider] || 'unknown'}")
-              existing = db[:llm_message_inference_responses].where(uuid: response_uuid).first
+              existing = llm_response_model.first(uuid: response_uuid)
 
               # Fallback: if we couldn't find a response by UUID, check if a response
               # already exists for this request (e.g., metering arrived first and created
               # a response with a different UUID). Enrich it instead of creating a duplicate.
               unless existing
-                existing = db[:llm_message_inference_responses]
-                           .where(message_inference_request_id: request[:id])
-                           .first
+                existing = llm_response_model.first(message_inference_request_id: request[:id])
                 log.debug("[ledger] response fallback: found existing response id=#{existing[:id]} for request_id=#{request[:id]}") if existing
               end
 
@@ -226,7 +224,7 @@ module Legion
               id = insert_with_savepoint(db, :llm_message_inference_responses, {
                                            uuid:                         response_uuid,
                                            message_inference_request_id: request[:id],
-                                           response_message_id:          response_message&.dig(:id),
+                                           response_message_id:          response_message&.[](:id),
                                            provider:                     provider(body),
                                            provider_instance:            provider_instance(body),
                                            model_key:                    model_id(body),
@@ -253,10 +251,10 @@ module Legion
                                            responded_at:                 recorded_at(body),
                                            inserted_at:                  Time.now.utc
                                          }, operation: 'official_record_writer.inference_response')
-              db[:llm_message_inference_responses][id: id]
+              llm_response_model[id]
             rescue Sequel::UniqueConstraintViolation => e
               log.debug("[ledger] response collision resolved uuid=#{response_uuid} error=#{e.class}")
-              existing = db[:llm_message_inference_responses].where(uuid: response_uuid).first
+              existing = llm_response_model.first(uuid: response_uuid)
               if existing
                 enrich_response!(db, existing, response_message, body)
                 return existing
@@ -267,7 +265,7 @@ module Legion
 
             def enrich_response!(db, existing, response_message, body)
               updates = {}
-              update_if_missing(updates, existing, :response_message_id, response_message&.dig(:id))
+              update_if_missing(updates, existing, :response_message_id, response_message&.[](:id))
               update_if_missing(updates, existing, :tier, tier(body))
               update_if_missing(updates, existing, :provider_instance, provider_instance(body))
               update_if_missing(updates, existing, :finish_reason, finish_reason(body))
@@ -330,7 +328,7 @@ module Legion
 
             def find_or_create_metric(db, request, response, body)
               metric_uuid = stable_uuid(reference(body, :metric_id, :metric_ref) || "metric:#{request_ref(body)}")
-              existing = db[:llm_message_inference_metrics].where(uuid: metric_uuid).first
+              existing = llm_metric_model.first(uuid: metric_uuid)
               if existing
                 enrich_metric_context_accounting!(db, existing, body)
                 return existing
@@ -363,12 +361,12 @@ module Legion
 
               id = insert_with_savepoint(db, :llm_message_inference_metrics, attrs,
                                          operation: 'official_record_writer.inference_metric')
-              metric = db[:llm_message_inference_metrics][id: id]
+              metric = llm_metric_model[id]
               write_context_accounting_events(db, request, response, metric, body)
               metric
             rescue Sequel::UniqueConstraintViolation => e
               log.debug("[ledger] metric collision resolved uuid=#{metric_uuid} error=#{e.class}")
-              existing = db[:llm_message_inference_metrics].where(uuid: metric_uuid).first
+              existing = llm_metric_model.first(uuid: metric_uuid)
               if existing
                 enrich_metric_context_accounting!(db, existing, body)
                 return existing
@@ -484,8 +482,8 @@ module Legion
                 insert_with_savepoint(db, :llm_context_accounting_events, {
                                         uuid:                          uuid,
                                         message_inference_request_id:  request[:id],
-                                        message_inference_response_id: response&.dig(:id),
-                                        message_inference_metric_id:   metric&.dig(:id),
+                                        message_inference_response_id: response&.[](:id),
+                                        message_inference_metric_id:   metric&.[](:id),
                                         conversation_ref:              body[:conversation_id].to_s,
                                         request_ref:                   req_ref,
                                         event_type:                    normalized[:event_type].to_s,
@@ -515,9 +513,9 @@ module Legion
             end
 
             def request_ref(body)
-              body[:__ledger_request_ref] ||= reference(body, :request_id, :request_ref) ||
+              body[:__ledger_request_ref] ||= explicit_request_ref(body) ||
                                               correlation_id(body) ||
-                                              stable_uuid(SecureRandom.uuid)
+                                              generated_request_ref(body)
             end
 
             def link_response_message!(db, response_message, response)
@@ -529,7 +527,7 @@ module Legion
 
             def enrich_request!(db, existing, body, latest_message = nil)
               updates = {}
-              update_if_missing(updates, existing, :latest_message_id, latest_message&.dig(:id))
+              update_if_missing(updates, existing, :latest_message_id, latest_message&.[](:id))
               caller_refs = caller_identity_refs(db, body)
               update_if_missing(updates, existing, :caller_identity_id, caller_refs[:identity_id])
               update_if_missing(updates, existing, :caller_principal_id, caller_refs[:principal_id])
@@ -553,7 +551,7 @@ module Legion
 
               db[:llm_message_inference_requests].where(id: existing[:id]).update(updates)
               log.info("[ledger] enriched request id=#{existing[:id]} fields=#{updates.keys.join(',')}")
-              existing.merge(updates)
+              existing.refresh
             end
 
             def caller_identity(body)
@@ -770,15 +768,15 @@ module Legion
               int.positive? ? int : nil
             end
 
-            def resolve_parent_request_id(db, body)
+            def resolve_parent_request_id(_db, body)
               parent_ref = body[:parent_request_id] || body.dig(:context, :parent_request_id) || body.dig(:caller, :parent_request_ref)
               return nil unless present?(parent_ref)
 
               if parent_ref.is_a?(Integer)
                 parent_ref
               else
-                parent = db[:llm_message_inference_requests].where(request_ref: parent_ref.to_s).first
-                parent&.dig(:id)
+                parent = llm_request_model.lookup(parent_ref.to_s)
+                parent&.[](:id)
               end
             end
 
@@ -930,6 +928,53 @@ module Legion
 
             def next_message_seq(db, conversation)
               db[:llm_messages].where(conversation_id: conversation[:id]).max(:seq).to_i + 1
+            end
+
+            def explicit_request_ref(body)
+              reference(body, :request_id, :request_ref)
+            end
+
+            def generated_request_ref(body)
+              body[:__ledger_generated_request_ref] ||= SecureRandom.uuid
+            end
+
+            def llm_conversation_model
+              ensure_llm_models_loaded!
+              ::Legion::Data::Models::LLM::Conversation
+            end
+
+            def llm_message_model
+              ensure_llm_models_loaded!
+              ::Legion::Data::Models::LLM::Message
+            end
+
+            def llm_request_model
+              ensure_llm_models_loaded!
+              ::Legion::Data::Models::LLM::MessageInferenceRequest
+            end
+
+            def llm_response_model
+              ensure_llm_models_loaded!
+              ::Legion::Data::Models::LLM::MessageInferenceResponse
+            end
+
+            def llm_metric_model
+              ensure_llm_models_loaded!
+              ::Legion::Data::Models::LLM::MessageInferenceMetric
+            end
+
+            def ensure_llm_models_loaded!
+              require 'legion/data/model' unless defined?(::Legion::Data::Models)
+              ::Legion::Data::Models.instance_variable_set(:@loaded_models, []) unless ::Legion::Data::Models.loaded_models
+
+              missing = []
+              missing << 'llm/conversation' unless defined?(::Legion::Data::Models::LLM::Conversation)
+              missing << 'llm/message' unless defined?(::Legion::Data::Models::LLM::Message)
+              missing << 'llm/message_inference_request' unless defined?(::Legion::Data::Models::LLM::MessageInferenceRequest)
+              missing << 'llm/message_inference_response' unless defined?(::Legion::Data::Models::LLM::MessageInferenceResponse)
+              missing << 'llm/message_inference_metric' unless defined?(::Legion::Data::Models::LLM::MessageInferenceMetric)
+
+              ::Legion::Data::Models.require_sequel_models(missing) unless missing.empty?
             end
 
             def integer(value, default: 0)

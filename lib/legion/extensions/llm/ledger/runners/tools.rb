@@ -79,31 +79,30 @@ module Legion
               nil
             end
 
-            def find_or_resolve_response(db, body, ctx, props, headers)
+            def find_or_resolve_response(_db, body, ctx, props, headers)
               request_ref = ctx[:request_id] || body[:request_id] ||
                             props[:correlation_id] || headers['x-legion-llm-request-id']
               return nil unless request_ref # rubocop:disable Legion/Extension/RunnerReturnHash
 
-              request = db[:llm_message_inference_requests].where(request_ref: request_ref).first
+              request = llm_request_model.lookup(request_ref)
               return nil unless request # rubocop:disable Legion/Extension/RunnerReturnHash
 
-              db[:llm_message_inference_responses]
-                .where(message_inference_request_id: request[:id]).first
+              llm_response_model.first(message_inference_request_id: request[:id])
             end
 
-            def resolve_conversation_id(db, body, ctx, headers)
+            def resolve_conversation_id(_db, body, ctx, headers)
               conv_ref = ctx[:conversation_id] || body[:conversation_id] ||
                          headers['x-legion-llm-conversation-id']
               return nil unless conv_ref # rubocop:disable Legion/Extension/RunnerReturnHash
 
-              conv = db[:llm_conversations].where(uuid: stable_uuid(conv_ref)).first ||
-                     db[:llm_conversations].where(uuid: conv_ref).first
+              conv = llm_conversation_model.first(uuid: stable_uuid(conv_ref)) ||
+                     llm_conversation_model.first(uuid: conv_ref)
               conv&.[](:id)
             end
 
             def find_or_create_tool_call(db, response, body, ctx, tool, headers, identity_attrs, conversation_id)
               tool_uuid = derive_tool_call_uuid(body, ctx, tool, headers)
-              existing  = db[:llm_tool_calls].where(uuid: tool_uuid).first
+              existing  = llm_tool_call_model.first(uuid: tool_uuid)
               return [existing, false] if existing # rubocop:disable Legion/Extension/RunnerReturnHash
 
               response_id = response&.[](:id)
@@ -143,10 +142,10 @@ module Legion
                                            **identity_attrs,
                                            inserted_at:                   Time.now.utc
                                          }, operation: 'write_tool_record.tool_call')
-              [db[:llm_tool_calls][id: id], true]
+              [llm_tool_call_model[id], true]
             rescue Sequel::UniqueConstraintViolation => e
               log.debug("[ledger] tool_call collision resolved uuid=#{tool_uuid} error=#{e.class}")
-              row = db[:llm_tool_calls].where(uuid: tool_uuid).first
+              row = llm_tool_call_model.first(uuid: tool_uuid)
               raise(e) unless row
 
               [row, false]
@@ -160,7 +159,7 @@ module Legion
                              .where(tool_call_id: tool_call_id).max(:attempt_no).to_i + 1
               attempt_uuid = derive_attempt_uuid(tool_call_row[:uuid], attempt_no)
 
-              existing = db[:llm_tool_call_attempts].where(uuid: attempt_uuid).first
+              existing = llm_tool_call_attempt_model.first(uuid: attempt_uuid)
               return existing if existing # rubocop:disable Legion/Extension/RunnerReturnHash
 
               status     = tool[:status] || headers['x-legion-tool-status'] || 'success'
@@ -189,10 +188,10 @@ module Legion
                                            **identity_attrs,
                                            inserted_at:         Time.now.utc
                                          }, operation: 'write_tool_record.attempt')
-              db[:llm_tool_call_attempts][id: id]
+              llm_tool_call_attempt_model[id]
             rescue Sequel::UniqueConstraintViolation => e
               log.debug("[ledger] tool_call_attempt collision resolved uuid=#{attempt_uuid} error=#{e.class}")
-              db[:llm_tool_call_attempts].where(uuid: attempt_uuid).first || raise(e)
+              llm_tool_call_attempt_model.first(uuid: attempt_uuid) || raise(e)
             end
 
             def extract_identity_attrs(body, headers, db)
@@ -275,6 +274,45 @@ module Legion
                 Helpers::PersistenceLogging.insert_row(db, table, attributes,
                                                        operation: operation, warn_on_unique: false)
               end
+            end
+
+            def llm_request_model
+              ensure_llm_models_loaded!
+              ::Legion::Data::Models::LLM::MessageInferenceRequest
+            end
+
+            def llm_response_model
+              ensure_llm_models_loaded!
+              ::Legion::Data::Models::LLM::MessageInferenceResponse
+            end
+
+            def llm_conversation_model
+              ensure_llm_models_loaded!
+              ::Legion::Data::Models::LLM::Conversation
+            end
+
+            def llm_tool_call_model
+              ensure_llm_models_loaded!
+              ::Legion::Data::Models::LLM::ToolCall
+            end
+
+            def llm_tool_call_attempt_model
+              ensure_llm_models_loaded!
+              ::Legion::Data::Models::LLM::ToolCallAttempt
+            end
+
+            def ensure_llm_models_loaded!
+              require 'legion/data/model' unless defined?(::Legion::Data::Models)
+              ::Legion::Data::Models.instance_variable_set(:@loaded_models, []) unless ::Legion::Data::Models.loaded_models
+
+              missing = []
+              missing << 'llm/conversation' unless defined?(::Legion::Data::Models::LLM::Conversation)
+              missing << 'llm/message_inference_request' unless defined?(::Legion::Data::Models::LLM::MessageInferenceRequest)
+              missing << 'llm/message_inference_response' unless defined?(::Legion::Data::Models::LLM::MessageInferenceResponse)
+              missing << 'llm/tool_call' unless defined?(::Legion::Data::Models::LLM::ToolCall)
+              missing << 'llm/tool_call_attempt' unless defined?(::Legion::Data::Models::LLM::ToolCallAttempt)
+
+              ::Legion::Data::Models.require_sequel_models(missing) unless missing.empty?
             end
 
             include Legion::Extensions::Helpers::Lex if Legion::Extensions.const_defined?(:Helpers, false) &&

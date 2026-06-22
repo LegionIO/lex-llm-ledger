@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.7] - 2026-06-20
+
+### Changed
+- Cleaned up the official ledger write path to use `legion-data` LLM model classes for the hottest request/response/metric/tool lookups instead of raw `db[:table]` probes.
+- Split request reference resolution into explicit request refs, correlation fallback, and one generated-per-write fallback so the writer no longer hides that flow behind a single opaque expression.
+- Bootstrapped `Legion::Data::Models` on demand inside the ledger writer/tool runner so the same path works under the lightweight spec harness and the normal runtime.
+
 ## [0.7.6] - 2026-06-20
 
 ### Fixed
