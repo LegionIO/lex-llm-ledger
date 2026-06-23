@@ -212,12 +212,15 @@ module Legion
               existing = Runners::Requests.fetch(ref: ref)
               return enrich_request!(existing, body, latest_message) if existing
 
+              conv_id = conversation.is_a?(Hash) || conversation.respond_to?(:[]) ? conversation[:id] : nil
+              raise "find_or_create_request: conversation is #{conversation.class}: #{conversation.inspect[0..200]}" unless conv_id
+
               op = operation(body)
               identity_refs = Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
               record = Runners::Requests.find_or_create(
                 uuid:  stable_uuid(ref),
                 attrs: {
-                  conversation_id:         conversation[:id],
+                  conversation_id:         conv_id,
                   latest_message_id:       latest_message&.[](:id),
                   parent_request_id:       resolve_parent_request_id(body),
                   caller_principal_id:     identity_refs[:principal_id],
