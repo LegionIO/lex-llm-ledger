@@ -8,7 +8,6 @@ module Legion
       module Ledger
         module Actor
           class RegistryAvailability < Legion::Extensions::Actors::Subscription
-
             prefetch 4
 
             def runner_class = Legion::Extensions::Llm::Ledger::Runners::RegistryAvailability

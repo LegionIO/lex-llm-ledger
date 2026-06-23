@@ -5,8 +5,6 @@ require 'securerandom'
 require 'legion/logging'
 require 'legion/data/model'
 require_relative 'identity_resolution'
-require_relative '../helpers/subscription_message'
-require_relative '../helpers/decryption'
 
 module Legion
   module Extensions
@@ -23,10 +21,10 @@ module Legion
             # ─── Public API ────────────────────────────────────────────────
 
             def insert(payload:, metadata: {}, **_opts)
-              headers = Helpers::SubscriptionMessage.extract_headers(payload, metadata)
+              headers = metadata[:headers] || {}
               props   = metadata[:properties] || {}
 
-              body = payload.is_a?(Hash) ? payload : Helpers::Decryption.decrypt_if_needed(payload, metadata)
+              body = payload.is_a?(Hash) ? payload : {}
               ctx  = body[:message_context] || {}
               tool = body[:tool_call] || {}
 
@@ -35,12 +33,6 @@ module Legion
             rescue Sequel::UniqueConstraintViolation => e
               handle_exception(e, level: :debug, handled: true, operation: 'tools.insert_race')
               { result: :duplicate }
-            rescue Helpers::DecryptionUnavailable => e
-              handle_exception(e, level: :warn, handled: true, operation: 'tools.insert.decrypt')
-              raise
-            rescue Helpers::DecryptionFailed => e
-              handle_exception(e, level: :error, handled: true, operation: 'tools.insert.decrypt')
-              raise
             rescue StandardError => e
               handle_exception(e, level: :error, handled: true, operation: 'tools.insert')
               raise

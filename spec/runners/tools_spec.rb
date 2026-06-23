@@ -50,7 +50,8 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Tools do
   end
 
   def stable_uuid(value)
-    Legion::Extensions::Llm::Ledger::Helpers::StableIdentifiers.stable_uuid(value)
+    hex = Digest::SHA256.hexdigest(value.to_s)[0, 32]
+    "#{hex[0, 8]}-#{hex[8, 4]}-#{hex[12, 4]}-#{hex[16, 4]}-#{hex[20, 12]}"
   end
 
   def seed_inference_response(request_id: 'req_abc', conversation_id: 'conv_123')
@@ -167,14 +168,6 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Tools do
       expect do
         described_class.insert(payload: decrypted_body, metadata: metadata)
       end.to raise_error(Sequel::DatabaseError, /database down/)
-    end
-
-    it 'propagates DecryptionFailed for missing iv headers' do
-      metadata[:properties][:content_encoding] = 'encrypted/cs'
-
-      expect do
-        described_class.insert(payload: 'encrypted_blob', metadata: metadata)
-      end.to raise_error(Legion::Extensions::Llm::Ledger::Helpers::DecryptionFailed, /missing iv/)
     end
   end
 end

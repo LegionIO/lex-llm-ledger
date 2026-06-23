@@ -8,7 +8,6 @@ module Legion
       module Ledger
         module Actor
           class Tools < Legion::Extensions::Actors::Subscription
-
             prefetch 1
 
             def runner_class = Legion::Extensions::Llm::Ledger::Runners::Tools

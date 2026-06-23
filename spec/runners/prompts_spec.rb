@@ -143,13 +143,6 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Prompts do
       expect(official_payload[:caller_type]).to eq('human')
     end
 
-    it 'propagates DecryptionFailed for missing iv headers (NACK without requeue)' do
-      metadata[:properties][:content_encoding] = 'encrypted/cs'
-      expect do
-        described_class.insert(payload: 'encrypted_blob', metadata: metadata)
-      end.to raise_error(Legion::Extensions::Llm::Ledger::Helpers::DecryptionFailed, /missing iv/)
-    end
-
     context 'when response has inline thinking tags but no response_thinking key' do
       let(:inline_thinking_body) do
         decrypted_body.merge(

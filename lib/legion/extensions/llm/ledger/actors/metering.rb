@@ -8,7 +8,6 @@ module Legion
       module Ledger
         module Actor
           class Metering < Legion::Extensions::Actors::Subscription
-
             prefetch 4
             consumers 4
 

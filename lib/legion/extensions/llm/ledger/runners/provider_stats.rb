@@ -6,7 +6,7 @@ module Legion
       module Ledger
         module Runners
           module ProviderStats
-            extend self # rubocop:disable Style/ModuleFunction
+            extend self
 
             PERIOD_SECONDS = { 'hour' => 3600, 'day' => 86_400, 'week' => 604_800, 'month' => 2_592_000 }.freeze
 
@@ -89,11 +89,11 @@ module Legion
             end
 
             def latency_status(avg_ms)
-              return :unknown if avg_ms.nil?
-              return :healthy if avg_ms < 2_000
-              return :degraded if avg_ms < 8_000
-
-              :critical
+              if avg_ms.nil? then :unknown
+              elsif avg_ms < 2_000 then :healthy
+              elsif avg_ms < 8_000 then :degraded
+              else :critical
+              end
             end
           end
         end

@@ -5,10 +5,8 @@ require 'securerandom'
 require 'legion/logging'
 require 'legion/data/model'
 require 'legion/extensions/llm/responses/thinking_extractor'
+require 'legion/settings'
 require_relative 'identity_resolution'
-require_relative '../helpers/subscription_message'
-require_relative '../helpers/decryption'
-require_relative '../helpers/retention'
 
 module Legion
   module Extensions
@@ -28,12 +26,15 @@ module Legion
               'missing' => 0, 'profile_skipped' => 1, 'partial' => 2,
               'estimated' => 3, 'provider_reconciled' => 4
             }.freeze
+            RETENTION_MAP = { 'session_only' => 0, 'days_30' => 30, 'days_90' => 90, 'permanent' => nil }.freeze
+            PHI_TTL_DAYS = 30
+            DEFAULT_RETENTION_DAYS = 90
 
             # ─── Public API ────────────────────────────────────────────────
 
             # Full lifecycle write from audit.prompt queue.
             def insert(payload:, metadata: {}, **_opts)
-              headers = Helpers::SubscriptionMessage.extract_headers(payload, metadata)
+              headers = metadata[:headers] || {}
               body = resolve_body(payload, metadata)
               body = merge_official_fields(body, metadata, headers)
 
@@ -47,18 +48,12 @@ module Legion
               write_route_attempts(request, response, body)
               write_context_accounting_events(request, response, metric, body)
               { result: :ok, request_id: request[:id], response_id: response[:id], metric_id: metric[:id] }
-            rescue Helpers::DecryptionUnavailable => e
-              handle_exception(e, level: :warn, handled: true, operation: 'prompts.insert.decrypt')
-              raise
-            rescue Helpers::DecryptionFailed => e
-              handle_exception(e, level: :error, handled: true, operation: 'prompts.insert.decrypt')
-              raise
             end
 
             # Metering subset: conversation -> request -> response -> metric (NO messages).
             # Called by the Metering runner.
             def write_metering(payload:, metadata: {}, **_opts)
-              headers = Helpers::SubscriptionMessage.extract_headers(payload, metadata)
+              headers = metadata[:headers] || {}
               body = resolve_body(payload, metadata)
               body = merge_official_fields(body, metadata, headers)
 
@@ -90,10 +85,8 @@ module Legion
 
             # ─── Body Resolution ───────────────────────────────────────────
 
-            def resolve_body(payload, metadata)
-              return payload if payload.is_a?(Hash)
-
-              Helpers::Decryption.decrypt_if_needed(payload, metadata)
+            def resolve_body(payload, _metadata)
+              payload.is_a?(Hash) ? payload : {}
             end
 
             def merge_official_fields(body, metadata, headers)
@@ -136,10 +129,17 @@ module Legion
             # ─── TTL / Retention ───────────────────────────────────────────
 
             def resolve_expires_at(headers:, body:)
-              Helpers::Retention.resolve(
-                retention:    headers['x-legion-retention'],
-                contains_phi: headers['x-legion-contains-phi'] == 'true' || body.dig(:classification, :contains_phi) || false
+              resolve_retention_expires_at(
+                headers['x-legion-retention'],
+                headers['x-legion-contains-phi'] == 'true' || body.dig(:classification, :contains_phi) || false
               )
+            end
+
+            def resolve_retention_expires_at(retention_label, contains_phi)
+              label = retention_label.to_s.empty? ? 'default' : retention_label.to_s
+              days = label == 'default' ? DEFAULT_RETENTION_DAYS : RETENTION_MAP.fetch(label, DEFAULT_RETENTION_DAYS)
+              days = [days, PHI_TTL_DAYS].compact.min if contains_phi
+              days ? Time.now.utc + (days * 86_400) : nil
             end
 
             # ─── Lifecycle Persistence ─────────────────────────────────────
@@ -892,14 +892,12 @@ module Legion
             end
 
             def official_identity_payload(body, headers)
-              identity = Helpers::CallerIdentity.normalize(
-                caller_raw: body[:caller], identity: body[:identity], headers: headers
-              )
+              normalized = IdentityResolution.normalize_caller(body: body, headers: headers)
               {
-                caller_identity:       identity[:identity],
-                caller_type:           identity[:type],
-                __header_principal_id: identity[:principal_id],
-                __header_identity_id:  identity[:identity_id]
+                caller_identity:       normalized[:identity],
+                caller_type:           normalized[:type],
+                __header_principal_id: normalized[:principal_id],
+                __header_identity_id:  normalized[:identity_id]
               }.compact
             end
 
