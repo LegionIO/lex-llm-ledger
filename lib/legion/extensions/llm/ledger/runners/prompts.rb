@@ -146,29 +146,24 @@ module Legion
 
             def find_or_create_conversation(body, _headers)
               uuid = stable_uuid(reference(body, :conversation_id) || 'default-conversation')
-              existing = Legion::Data::Models::LLM::Conversation.first(uuid: uuid)
-              return existing if existing
-
-              Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
-              Legion::Data::Models::LLM::Conversation.create(
-                uuid:                    uuid,
-                title:                   body[:title] || body[:conversation_title],
-                classification_level:    classification_level(body),
-                contains_phi:            body[:contains_phi] || false,
-                contains_pii:            body[:contains_pii] || false,
-                pii_types_json:          json_dump(Array(body.dig(:classification, :pii_types))),
-                jurisdictions_json:      json_dump(Array(body.dig(:classification, :jurisdictions) || body[:jurisdictions])),
-                retention_policy:        body[:retention_policy] || 'default',
-                expires_at:              body[:expires_at],
-                identity_canonical_name: Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
-                recorded_at:             recorded_at(body),
-                inserted_at:             Time.now.utc,
-                created_at:              Time.now.utc,
-                updated_at:              Time.now.utc
+              Runners::Conversations.find_or_create(
+                uuid: uuid,
+                attrs: {
+                  title:                   body[:title] || body[:conversation_title],
+                  classification_level:    classification_level(body),
+                  contains_phi:            body[:contains_phi] || false,
+                  contains_pii:            body[:contains_pii] || false,
+                  pii_types_json:          json_dump(Array(body.dig(:classification, :pii_types))),
+                  jurisdictions_json:      json_dump(Array(body.dig(:classification, :jurisdictions) || body[:jurisdictions])),
+                  retention_policy:        body[:retention_policy] || 'default',
+                  expires_at:              body[:expires_at],
+                  identity_canonical_name: Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
+                  recorded_at:             recorded_at(body),
+                  inserted_at:             Time.now.utc,
+                  created_at:              Time.now.utc,
+                  updated_at:              Time.now.utc
+                }
               )
-            rescue Sequel::UniqueConstraintViolation => e
-              handle_exception(e, level: :debug, handled: true, operation: 'prompts.conversation_race')
-              Legion::Data::Models::LLM::Conversation.first(uuid: uuid)
             end
 
             def find_or_create_user_message(conversation, body, _headers)
