@@ -64,7 +64,9 @@ module Legion
                 end
               end
 
-              log.warn("[ledger] tools: response not available after retries, proceeding with null response_id")
+              request_reference = ctx[:request_id] || body[:request_id] || props[:correlation_id] || headers['x-legion-llm-request-id']
+              request = request_reference ? Legion::Extensions::Llm::Ledger::Runners::Requests.fetch(ref: request_reference) : nil
+              log.warn("[ledger] tools: response not available ref=#{request_reference} request_found=#{!request.nil?} response_found=false")
               nil
             end
 
@@ -119,7 +121,11 @@ module Legion
               return [existing, false] if existing
 
               response_id = response&.[](:id)
-              next_index  = response ? Legion::Data::Models::LLM::ToolCall.where(message_inference_response_id: response[:id]).max(:tool_call_index).to_i + 1 : 0
+              next_index = if response
+                             Legion::Data::Models::LLM::ToolCall.where(message_inference_response_id: response[:id]).max(:tool_call_index).to_i + 1
+                           else
+                             0
+                           end
               tool_source = tool[:source] || {}
               status      = tool[:status] || headers['x-legion-tool-status'] || 'success'
               timestamps  = body[:timestamps] || {}

@@ -39,6 +39,14 @@ module Legion
               fetch(uuid: uuid)
             end
 
+            def enrich(record:, updates:, **)
+              return record if updates.nil? || updates.empty?
+
+              Legion::Data::Models::LLM::MessageInferenceResponse.where(id: record[:id]).update(updates)
+              invalidate(id: record[:id], uuid: record[:uuid], request_id: record[:message_inference_request_id])
+              record.merge(updates)
+            end
+
             def invalidate(id: nil, uuid: nil, request_id: nil, **)
               cache_delete("ledger:resp:id:#{id}") if id && cache_available?
               cache_delete("ledger:resp:uuid:#{uuid}") if uuid && cache_available?
@@ -60,6 +68,7 @@ module Legion
 
               record = Legion::Data::Models::LLM::MessageInferenceResponse[id]
               return nil unless record
+
               result = record.values
               cache_record(result)
               result
@@ -73,6 +82,7 @@ module Legion
 
               record = Legion::Data::Models::LLM::MessageInferenceResponse.first(uuid: uuid)
               return nil unless record
+
               result = record.values
               cache_record(result)
               result
@@ -86,6 +96,7 @@ module Legion
 
               record = Legion::Data::Models::LLM::MessageInferenceResponse.first(message_inference_request_id: request_id)
               return nil unless record
+
               result = record.values
               cache_record(result)
               result

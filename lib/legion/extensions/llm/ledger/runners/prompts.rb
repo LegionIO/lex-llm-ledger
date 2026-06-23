@@ -40,6 +40,8 @@ module Legion
               headers = metadata[:headers] || {}
               body = resolve_body(payload, metadata)
               body = merge_official_fields(body, metadata, headers)
+              body[:__identity_refs] = Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.resolve_refs(body: body, headers: headers)
+              body[:__identity_canonical_name] = Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.canonical_name(body: body, headers: headers)
 
               conversation = find_or_create_conversation(body, headers)
               user_message = find_or_create_user_message(conversation, body, headers)
@@ -60,6 +62,8 @@ module Legion
               headers = metadata[:headers] || {}
               body = resolve_body(payload, metadata)
               body = merge_official_fields(body, metadata, headers)
+              body[:__identity_refs] = Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.resolve_refs(body: body, headers: headers)
+              body[:__identity_canonical_name] = Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.canonical_name(body: body, headers: headers)
 
               conversation = find_or_create_conversation(body, headers)
               request = find_or_create_request(conversation, nil, body, headers)
@@ -76,7 +80,7 @@ module Legion
               message = Legion::Extensions::Llm::Ledger::Runners::Messages.fetch(id: response_message_id)
               return { result: :ok } unless message && message[:message_inference_response_id] != response_id
 
-              message.update(message_inference_response_id: response_id)
+              Legion::Data::Models::LLM::Message.where(id: message[:id]).update(message_inference_response_id: response_id)
               { result: :ok }
             rescue StandardError => e
               handle_exception(e, level: :warn, handled: true, operation: 'prompts.link')
@@ -164,7 +168,7 @@ module Legion
 
             def find_or_create_conversation(body, _headers)
               uuid = stable_uuid(reference(body, :conversation_id) || 'default-conversation')
-              record = Legion::Extensions::Llm::Ledger::Runners::Conversations.find_or_create(
+              Legion::Extensions::Llm::Ledger::Runners::Conversations.find_or_create(
                 uuid:  uuid,
                 attrs: {
                   title:                   body[:title] || body[:conversation_title],
@@ -175,20 +179,21 @@ module Legion
                   jurisdictions_json:      json_dump(Array(body.dig(:classification, :jurisdictions) || body[:jurisdictions])),
                   retention_policy:        body[:retention_policy] || 'default',
                   expires_at:              body[:expires_at],
-                  identity_canonical_name: Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
+                  identity_canonical_name: body[:__identity_canonical_name] || Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.canonical_name(
+                    body: body, headers: {}
+                  ),
                   recorded_at:             recorded_at(body),
                   inserted_at:             Time.now.utc,
                   created_at:              Time.now.utc,
                   updated_at:              Time.now.utc
                 }
               )
-              record
             end
 
             def find_or_create_user_message(conversation, body, _headers)
               uuid = stable_uuid(reference(body, :message_id) || "request-message:#{request_ref(body)}")
               seq = body[:message_seq] ? integer(body[:message_seq]) : next_message_seq(conversation)
-              identity_refs = Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
+              identity_refs = cached_identity_refs(body)
               Legion::Extensions::Llm::Ledger::Runners::Messages.find_or_create(
                 uuid:  uuid,
                 attrs: {
@@ -201,7 +206,9 @@ module Legion
                   output_tokens:           0,
                   identity_principal_id:   identity_refs[:principal_id],
                   identity_id:             identity_refs[:identity_id],
-                  identity_canonical_name: Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
+                  identity_canonical_name: body[:__identity_canonical_name] || Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.canonical_name(
+                    body: body, headers: {}
+                  ),
                   created_at:              recorded_at(body),
                   inserted_at:             Time.now.utc
                 }
@@ -213,11 +220,10 @@ module Legion
               existing = Legion::Extensions::Llm::Ledger::Runners::Requests.fetch(ref: ref)
               return enrich_request!(existing, body, latest_message) if existing
 
-
               conv_id = conversation[:id]
 
               op = operation(body)
-              identity_refs = Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
+              identity_refs = cached_identity_refs(body)
               record = Legion::Extensions::Llm::Ledger::Runners::Requests.find_or_create(
                 uuid:  stable_uuid(ref),
                 attrs: {
@@ -226,7 +232,9 @@ module Legion
                   parent_request_id:       resolve_parent_request_id(body),
                   caller_principal_id:     identity_refs[:principal_id],
                   caller_identity_id:      identity_refs[:identity_id],
-                  identity_canonical_name: Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
+                  identity_canonical_name: body[:__identity_canonical_name] || Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.canonical_name(
+                    body: body, headers: {}
+                  ),
                   runtime_caller_type:     caller_type(body),
                   runtime_caller_class:    runtime_caller_class(body),
                   runtime_caller_client:   runtime_caller_client(body),
@@ -261,7 +269,7 @@ module Legion
               uuid = stable_uuid(reference(body, :response_message_id) || "response-message:#{request_ref(body)}")
               latest = Legion::Extensions::Llm::Ledger::Runners::Messages.fetch(id: request[:latest_message_id])
               seq = (latest&.[](:seq) || 1) + 1
-              identity_refs = Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
+              identity_refs = cached_identity_refs(body)
               Legion::Extensions::Llm::Ledger::Runners::Messages.find_or_create(
                 uuid:  uuid,
                 attrs: {
@@ -276,7 +284,9 @@ module Legion
                   output_tokens:                token_count(body, :output_tokens),
                   identity_principal_id:        identity_refs[:principal_id],
                   identity_id:                  identity_refs[:identity_id],
-                  identity_canonical_name:      Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
+                  identity_canonical_name:      body[:__identity_canonical_name] || Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.canonical_name(
+                    body: body, headers: {}
+                  ),
                   created_at:                   recorded_at(body),
                   inserted_at:                  Time.now.utc
                 }
@@ -298,7 +308,7 @@ module Legion
               vis = visible_response(body)
               thinking = thinking_response(body)
               is_phi = body[:contains_phi] || false
-              identity_refs = Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
+              identity_refs = cached_identity_refs(body)
 
               record = Legion::Extensions::Llm::Ledger::Runners::Responses.find_or_create(
                 uuid:  response_uuid,
@@ -327,7 +337,9 @@ module Legion
                   escalation_chain_ref:         body[:escalation_chain_ref],
                   identity_principal_id:        identity_refs[:principal_id],
                   identity_id:                  identity_refs[:identity_id],
-                  identity_canonical_name:      Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
+                  identity_canonical_name:      body[:__identity_canonical_name] || Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.canonical_name(
+                    body: body, headers: {}
+                  ),
                   responded_at:                 recorded_at(body),
                   inserted_at:                  Time.now.utc
                 }
@@ -345,7 +357,7 @@ module Legion
                 return existing
               end
 
-              identity_refs = Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
+              identity_refs = cached_identity_refs(body)
               record = Legion::Extensions::Llm::Ledger::Runners::Metrics.find_or_create(
                 uuid:  metric_uuid,
                 attrs: {
@@ -366,7 +378,9 @@ module Legion
                   budget_key:                    billing(body)[:budget_id] || billing(body)[:budget_key],
                   identity_principal_id:         identity_refs[:principal_id],
                   identity_id:                   identity_refs[:identity_id],
-                  identity_canonical_name:       Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
+                  identity_canonical_name:       body[:__identity_canonical_name] || Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.canonical_name(
+                    body: body, headers: {}
+                  ),
                   recorded_at:                   recorded_at(body),
                   inserted_at:                   Time.now.utc
                 }.merge(context_accounting_metric_columns(body))
@@ -383,7 +397,7 @@ module Legion
               update_if_missing(updates, existing, :runtime_caller_class, runtime_caller_class(body))
               update_if_missing(updates, existing, :runtime_caller_client, runtime_caller_client(body))
               update_if_missing(updates, existing, :identity_canonical_name,
-                                Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.canonical_name(body: body, headers: {}))
+                                cached_canonical_name(body))
               update_if_missing(updates, existing, :request_content_hash, resolve_request_content_hash(body))
 
               rj = request_payload(body) ? storage_json_dump(request_payload(body)) : nil
@@ -391,7 +405,8 @@ module Legion
 
               return existing if updates.empty?
 
-              existing.update(updates)
+              existing = Legion::Extensions::Llm::Ledger::Runners::Requests.enrich(record: existing, updates: updates)
+              existing = Legion::Extensions::Llm::Ledger::Runners::Requests.enrich(record: existing, updates: updates)
               existing
             end
 
@@ -403,7 +418,7 @@ module Legion
               update_if_missing(updates, existing, :finish_reason, finish_reason(body))
               update_if_missing(updates, existing, :dispatch_path, body[:dispatch_path] || body[:tier])
               update_if_missing(updates, existing, :identity_canonical_name,
-                                Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.canonical_name(body: body, headers: {}))
+                                cached_canonical_name(body))
               update_if_missing(updates, existing, :response_content_hash, resolve_response_content_hash(body))
 
               vis = visible_response(body)
@@ -414,7 +429,8 @@ module Legion
 
               return existing if updates.empty?
 
-              existing.update(updates)
+              existing = Legion::Extensions::Llm::Ledger::Runners::Responses.enrich(record: existing, updates: updates)
+              existing = Legion::Extensions::Llm::Ledger::Runners::Responses.enrich(record: existing, updates: updates)
               existing
             end
 
@@ -453,7 +469,8 @@ module Legion
                 context_accounting_status:             incoming_status,
                 context_accounting_json:               storage_json_dump(incoming)
               }
-              existing.update(updates)
+              existing = Legion::Extensions::Llm::Ledger::Runners::Metrics.enrich(record: existing, updates: updates)
+              existing = Legion::Extensions::Llm::Ledger::Runners::Metrics.enrich(record: existing, updates: updates)
               existing
             rescue StandardError => e
               handle_exception(e, level: :warn, handled: true, operation: 'prompts.context_accounting_enrich')
@@ -466,7 +483,7 @@ module Legion
               attempts = Array(body[:route_attempt_details])
               return if attempts.empty?
 
-              identity_refs = Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
+              identity_refs = cached_identity_refs(body)
               attempts.each_with_index do |attempt, idx|
                 next unless attempt.is_a?(Hash)
 
@@ -493,7 +510,9 @@ module Legion
                     ended_at:                      attempt[:ended_at],
                     identity_principal_id:         identity_refs[:principal_id],
                     identity_id:                   identity_refs[:identity_id],
-                    identity_canonical_name:       Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
+                    identity_canonical_name:       body[:__identity_canonical_name] || Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.canonical_name(
+                      body: body, headers: {}
+                    ),
                     inserted_at:                   Time.now.utc
                   }
                 )
@@ -719,28 +738,30 @@ module Legion
 
             def context_accounting_metric_columns(body)
               accounting = context_accounting(body)
+              tokens = accounting[:tokens] || {}
+              counts = accounting[:counts] || {}
               {
-                request_message_estimated_tokens:      token_count(body, :request_message_estimated_tokens),
-                loaded_history_estimated_tokens:       token_count(body, :loaded_history_estimated_tokens),
-                curated_history_estimated_tokens:      token_count(body, :curated_history_estimated_tokens),
-                curation_saved_estimated_tokens:       token_count(body, :curation_saved_estimated_tokens),
-                stripped_thinking_estimated_tokens:    token_count(body, :stripped_thinking_estimated_tokens),
-                archived_history_estimated_tokens:     token_count(body, :archived_history_estimated_tokens),
-                archive_saved_estimated_tokens:        token_count(body, :archive_saved_estimated_tokens),
-                context_window_saved_estimated_tokens: token_count(body, :context_window_saved_estimated_tokens),
-                rag_injected_estimated_tokens:         token_count(body, :rag_injected_estimated_tokens),
-                system_prompt_estimated_tokens:        token_count(body, :system_prompt_estimated_tokens),
-                baseline_system_estimated_tokens:      token_count(body, :baseline_system_estimated_tokens),
-                tool_definition_estimated_tokens:      token_count(body, :tool_definition_estimated_tokens),
-                final_context_estimated_tokens:        token_count(body, :final_context_estimated_tokens),
-                loaded_history_message_count:          token_count(body, :loaded_history_message_count),
-                curated_history_message_count:         token_count(body, :curated_history_message_count),
-                archived_history_message_count:        token_count(body, :archived_history_message_count),
-                stripped_thinking_message_count:       token_count(body, :stripped_thinking_message_count),
-                context_window_message_count_before:   token_count(body, :context_window_message_count_before),
-                context_window_message_count_after:    token_count(body, :context_window_message_count_after),
-                rag_entry_count:                       token_count(body, :rag_entry_count),
-                tool_definition_count:                 token_count(body, :tool_definition_count),
+                request_message_estimated_tokens:      integer(tokens[:request_message_estimated_tokens]),
+                loaded_history_estimated_tokens:       integer(tokens[:loaded_history_estimated_tokens]),
+                curated_history_estimated_tokens:      integer(tokens[:curated_history_estimated_tokens]),
+                curation_saved_estimated_tokens:       integer(tokens[:curation_saved_estimated_tokens]),
+                stripped_thinking_estimated_tokens:    integer(tokens[:stripped_thinking_estimated_tokens]),
+                archived_history_estimated_tokens:     integer(tokens[:archived_history_estimated_tokens]),
+                archive_saved_estimated_tokens:        integer(tokens[:archive_saved_estimated_tokens]),
+                context_window_saved_estimated_tokens: integer(tokens[:context_window_saved_estimated_tokens]),
+                rag_injected_estimated_tokens:         integer(tokens[:rag_injected_estimated_tokens]),
+                system_prompt_estimated_tokens:        integer(tokens[:system_prompt_estimated_tokens]),
+                baseline_system_estimated_tokens:      integer(tokens[:baseline_system_estimated_tokens]),
+                tool_definition_estimated_tokens:      integer(tokens[:tool_definition_estimated_tokens]),
+                final_context_estimated_tokens:        integer(tokens[:final_context_estimated_tokens]),
+                loaded_history_message_count:          integer(counts[:loaded_history_message_count]),
+                curated_history_message_count:         integer(counts[:curated_history_message_count]),
+                archived_history_message_count:        integer(counts[:archived_history_message_count]),
+                stripped_thinking_message_count:       integer(counts[:stripped_thinking_message_count]),
+                context_window_message_count_before:   integer(counts[:context_window_message_count_before]),
+                context_window_message_count_after:    integer(counts[:context_window_message_count_after]),
+                rag_entry_count:                       integer(counts[:rag_entry_count]),
+                tool_definition_count:                 integer(counts[:tool_definition_count]),
                 context_accounting_status:             (accounting[:status] || 'missing').to_s,
                 context_accounting_json:               accounting.empty? ? nil : storage_json_dump(accounting)
               }
@@ -859,6 +880,16 @@ module Legion
 
             def next_message_seq(conversation)
               Legion::Data::Models::LLM::Message.where(conversation_id: conversation[:id]).max(:seq).to_i + 1
+            end
+
+            def cached_identity_refs(body)
+              body[:__identity_refs] ||
+                Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
+            end
+
+            def cached_canonical_name(body)
+              body[:__identity_canonical_name] ||
+                Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.canonical_name(body: body, headers: {})
             end
 
             def reference(body, *keys)

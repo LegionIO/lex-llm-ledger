@@ -59,6 +59,7 @@ module Legion
 
               record = Legion::Data::Models::LLM::Message[id]
               return nil unless record
+
               result = record.values
               cache_record(result)
               result
@@ -72,6 +73,7 @@ module Legion
 
               record = Legion::Data::Models::LLM::Message.first(uuid: uuid)
               return nil unless record
+
               result = record.values
               cache_record(result)
               result
