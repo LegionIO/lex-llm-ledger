@@ -17,7 +17,8 @@ module Legion
             extend self
             extend Legion::Logging::Helper
 
-            def insert(payload:, metadata: {}, **)
+            def insert(payload: nil, metadata: nil, **message)
+              payload, metadata = normalize_insert_args(payload, metadata, message)
               headers = metadata[:headers] || {}
               props   = metadata[:properties] || {}
               body    = payload.is_a?(Hash) ? payload : {}
@@ -91,6 +92,15 @@ module Legion
 
               hex = Digest::SHA256.hexdigest(raw)[0, 32]
               "#{hex[0, 8]}-#{hex[8, 4]}-#{hex[12, 4]}-#{hex[16, 4]}-#{hex[20, 12]}"
+            end
+
+            def normalize_insert_args(payload, metadata, message)
+              if payload
+                [payload, metadata || {}]
+              else
+                headers = message.each_with_object({}) { |(k, v), h| h[k.to_s] = v if k.to_s.start_with?('x-legion-') }
+                [message, { headers: headers, properties: { message_id: message[:message_id], correlation_id: message[:correlation_id] } }]
+              end
             end
 
             include Legion::Extensions::Helpers::Lex if Legion::Extensions.const_defined?(:Helpers, false) &&

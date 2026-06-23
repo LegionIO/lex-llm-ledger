@@ -12,15 +12,33 @@ module Legion
       module Ledger
         module Runners
           module Metering
-            extend self # rubocop:disable Style/ModuleFunction
+            extend self
             extend Legion::Logging::Helper
 
             # Persist a metering record into the official lifecycle schema.
             # Delegates to Prompts.write_metering which handles conversation ->
             # request -> response -> metric without creating message rows.
-            def insert(payload:, metadata: {}, **)
-              Runners::Prompts.write_metering(payload: payload, metadata: metadata)
+            #
+            # Accepts either kwargs-style (payload:, metadata:) for direct calls
+            # or a flat message hash from the Subscription actor dispatch.
+            def insert(payload: nil, metadata: nil, **message)
+              if payload
+                Runners::Prompts.write_metering(payload: payload, metadata: metadata || {})
+              else
+                Runners::Prompts.write_metering(payload: message, metadata: { headers: extract_headers(message) })
+              end
             end
+
+            private
+
+            def extract_headers(message)
+              message.each_with_object({}) do |(key, value), hdrs|
+                str = key.to_s
+                hdrs[str] = value if str.start_with?('x-legion-') || str == 'legion_protocol_version'
+              end
+            end
+
+            public
 
             # Look up a metric by request reference.
             def find(request_ref:, **)

@@ -33,7 +33,10 @@ module Legion
             # ─── Public API ────────────────────────────────────────────────
 
             # Full lifecycle write from audit.prompt queue.
-            def insert(payload:, metadata: {}, **)
+            # Accepts either (payload:, metadata:) for direct calls or a flat
+            # message hash from Subscription actor dispatch.
+            def insert(payload: nil, metadata: nil, **message)
+              payload, metadata = normalize_args(payload, metadata, message)
               headers = metadata[:headers] || {}
               body = resolve_body(payload, metadata)
               body = merge_official_fields(body, metadata, headers)
@@ -52,7 +55,8 @@ module Legion
 
             # Metering subset: conversation -> request -> response -> metric (NO messages).
             # Called by the Metering runner.
-            def write_metering(payload:, metadata: {}, **)
+            def write_metering(payload: nil, metadata: nil, **message)
+              payload, metadata = normalize_args(payload, metadata, message)
               headers = metadata[:headers] || {}
               body = resolve_body(payload, metadata)
               body = merge_official_fields(body, metadata, headers)
@@ -82,6 +86,20 @@ module Legion
             private
 
             # rubocop:disable Legion/Extension/RunnerReturnHash
+
+            # ─── Argument Normalization ────────────────────────────────────
+
+            def normalize_args(payload, metadata, message)
+              if payload
+                [payload, metadata || {}]
+              else
+                headers = message.each_with_object({}) do |(key, value), hdrs|
+                  str = key.to_s
+                  hdrs[str] = value if str.start_with?('x-legion-') || str == 'legion_protocol_version'
+                end
+                [message, { headers: headers, properties: { message_id: message[:message_id], correlation_id: message[:correlation_id] } }]
+              end
+            end
 
             # ─── Body Resolution ───────────────────────────────────────────
 
