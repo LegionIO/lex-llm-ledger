@@ -39,7 +39,8 @@ module Legion
             def purge_table(table)
               deleted = 0
               relation = purge_relation(table)
-              loop do
+              max_iterations = 1000
+              max_iterations.times do
                 ids = relation.where { expires_at <= Time.now.utc }
                               .where(Sequel.~(expires_at: nil))
                               .select(:id)

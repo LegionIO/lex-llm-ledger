@@ -33,7 +33,7 @@ module Legion
               cache_record(record)
               record
             rescue Sequel::UniqueConstraintViolation => e
-              handle_exception(e, level: :debug, handled: true, operation: 'messages.find_or_create_race')
+              handle_exception(e, level: :warn, handled: true, operation: 'messages.find_or_create_race')
               fetch(uuid: uuid)
             end
 

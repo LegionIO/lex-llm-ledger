@@ -24,7 +24,7 @@ module Legion
               log.info("[ledger] registry_availability.insert event_id=#{record[:event_id]}")
               { result: :ok }
             rescue Sequel::UniqueConstraintViolation => e
-              handle_exception(e, level: :debug, handled: true, operation: 'registry_availability.insert_race')
+              handle_exception(e, level: :warn, handled: true, operation: 'registry_availability.insert_race')
               { result: :duplicate }
             rescue StandardError => e
               handle_exception(e, level: :error, handled: true, operation: 'registry_availability.insert')

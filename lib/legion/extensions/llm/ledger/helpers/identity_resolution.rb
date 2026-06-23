@@ -83,7 +83,7 @@ module Legion
                 !Legion::Data::Model::Identity::Principal.dataset.nil? &&
                 !Legion::Data::Model::Identity::Identity.dataset.nil?
             rescue StandardError => e
-              handle_exception(e, level: :debug, handled: true, operation: 'identity_resolution.tables_check')
+              handle_exception(e, level: :warn, handled: true, operation: 'identity_resolution.tables_check')
               false
             end
 
@@ -123,7 +123,7 @@ module Legion
                   updated_at:    Time.now.utc
                 )
             rescue Sequel::UniqueConstraintViolation => e
-              handle_exception(e, level: :debug, handled: true, operation: 'identity_resolution.provider_race')
+              handle_exception(e, level: :warn, handled: true, operation: 'identity_resolution.provider_race')
               Legion::Data::Model::Identity::Provider.first(name: name)
             end
 
@@ -139,7 +139,7 @@ module Legion
                   updated_at:     Time.now.utc
                 )
             rescue Sequel::UniqueConstraintViolation => e
-              handle_exception(e, level: :debug, handled: true, operation: 'identity_resolution.principal_race')
+              handle_exception(e, level: :warn, handled: true, operation: 'identity_resolution.principal_race')
               Legion::Data::Model::Identity::Principal.first(canonical_name: canonical, kind: kind)
             end
 
@@ -162,7 +162,7 @@ module Legion
                 updated_at:            Time.now.utc
               )
             rescue Sequel::UniqueConstraintViolation => e
-              handle_exception(e, level: :debug, handled: true, operation: 'identity_resolution.identity_race')
+              handle_exception(e, level: :warn, handled: true, operation: 'identity_resolution.identity_race')
               Legion::Data::Model::Identity::Identity.first(
                 principal_id:          principal[:id],
                 provider_id:           provider[:id],

@@ -33,7 +33,7 @@ module Legion
               cache_record(record)
               record
             rescue Sequel::UniqueConstraintViolation => e
-              handle_exception(e, level: :debug, handled: true, operation: 'route_attempts.race')
+              handle_exception(e, level: :warn, handled: true, operation: 'route_attempts.race')
               nil
             end
 

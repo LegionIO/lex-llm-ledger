@@ -34,7 +34,7 @@ module Legion
               response = find_or_resolve_response_with_retry(body, ctx, props, headers)
               write_tool_record(body, headers, ctx, props, tool, response)
             rescue Sequel::UniqueConstraintViolation => e
-              handle_exception(e, level: :debug, handled: true, operation: 'tools.insert_race')
+              handle_exception(e, level: :warn, handled: true, operation: 'tools.insert_race')
               { result: :duplicate }
             rescue StandardError => e
               handle_exception(e, level: :error, handled: true, operation: 'tools.insert')
@@ -108,7 +108,7 @@ module Legion
                 { result: :ok }
               end
             rescue Sequel::UniqueConstraintViolation => e
-              handle_exception(e, level: :debug, handled: true, operation: 'tools.write_tool_record_race')
+              handle_exception(e, level: :warn, handled: true, operation: 'tools.write_tool_record_race')
               { result: :duplicate }
             end
 
@@ -149,7 +149,7 @@ module Legion
               log.info("[ledger] tools.tool_call id=#{record[:id]} uuid=#{tool_uuid}")
               [record, true]
             rescue Sequel::UniqueConstraintViolation => e
-              handle_exception(e, level: :debug, handled: true, operation: 'tools.tool_call_race')
+              handle_exception(e, level: :warn, handled: true, operation: 'tools.tool_call_race')
               row = Legion::Data::Models::LLM::ToolCall.first(uuid: tool_uuid)
               raise unless row
 
@@ -193,7 +193,7 @@ module Legion
               log.info("[ledger] tools.attempt id=#{record[:id]}")
               record
             rescue Sequel::UniqueConstraintViolation => e
-              handle_exception(e, level: :debug, handled: true, operation: 'tools.attempt_race')
+              handle_exception(e, level: :warn, handled: true, operation: 'tools.attempt_race')
               Legion::Data::Models::LLM::ToolCallAttempt.first(uuid: attempt_uuid) || raise
             end
 
