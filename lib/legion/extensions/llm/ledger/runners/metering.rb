@@ -3,6 +3,8 @@
 require 'legion/logging'
 require 'legion/data/model'
 require_relative 'prompts'
+require_relative 'requests'
+require_relative 'metrics'
 
 module Legion
   module Extensions
@@ -24,11 +26,10 @@ module Legion
             def find(request_ref:, **_opts)
               return { result: :not_found } unless request_ref
 
-              request = Legion::Data::Models::LLM::MessageInferenceRequest.lookup(request_ref)
+              request = Runners::Requests.fetch(ref: request_ref)
               return { result: :not_found } unless request
 
-              metric = Legion::Data::Models::LLM::MessageInferenceMetric
-                       .first(message_inference_request_id: request[:id])
+              metric = Runners::Metrics.fetch(request_id: request[:id])
               return { result: :not_found } unless metric
 
               { result: :ok, metric: metric.to_h }

@@ -6,6 +6,7 @@ require 'legion/json'
 require 'legion/logging'
 require 'legion/data/model'
 require_relative '../helpers/identity_resolution'
+require_relative 'conversations'
 
 module Legion
   module Extensions
@@ -75,8 +76,7 @@ module Legion
               conv_ref = body[:conversation_id] || headers['x-legion-llm-conversation-id']
               return nil unless conv_ref # rubocop:disable Legion/Extension/RunnerReturnHash
 
-              conv = Legion::Data::Models::LLM::Conversation.first(uuid: stable_uuid(conv_ref)) ||
-                     Legion::Data::Models::LLM::Conversation.first(uuid: conv_ref)
+              conv = Runners::Conversations.fetch(ref: conv_ref)
               conv&.[](:id)
             end
 

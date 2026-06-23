@@ -5,6 +5,9 @@ require 'securerandom'
 require 'legion/logging'
 require 'legion/data/model'
 require_relative '../helpers/identity_resolution'
+require_relative 'conversations'
+require_relative 'requests'
+require_relative 'responses'
 
 module Legion
   module Extensions
@@ -69,10 +72,10 @@ module Legion
                                   props[:correlation_id] || headers['x-legion-llm-request-id']
               return nil unless request_reference
 
-              request = Legion::Data::Models::LLM::MessageInferenceRequest.lookup(request_reference)
+              request = Runners::Requests.fetch(ref: request_reference)
               return nil unless request
 
-              request.message_inference_responses_dataset.first
+              Runners::Responses.fetch(request_id: request[:id])
             end
 
             # ─── Tool Record Persistence ───────────────────────────────────
@@ -212,8 +215,7 @@ module Legion
                                        headers['x-legion-llm-conversation-id']
               return nil unless conversation_reference
 
-              conversation = Legion::Data::Models::LLM::Conversation.first(uuid: stable_uuid(conversation_reference)) ||
-                             Legion::Data::Models::LLM::Conversation.first(uuid: conversation_reference)
+              conversation = Runners::Conversations.fetch(ref: conversation_reference)
               conversation&.[](:id)
             end
 

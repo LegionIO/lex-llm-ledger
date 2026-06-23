@@ -85,7 +85,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Conversations do
     end
 
     it 'merges supplied attrs into the created record' do
-      uuid  = 'find-or-create-attrs-uuid'
+      uuid = 'find-or-create-attrs-uuid'
       record = described_class.find_or_create(uuid: uuid, attrs: { retention_policy: 'permanent' })
       expect(record[:retention_policy]).to eq('permanent')
     end
