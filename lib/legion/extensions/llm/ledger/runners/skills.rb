@@ -41,8 +41,8 @@ module Legion
             private
 
             def build_skill_record(body, props, headers)
-              refs  = Helpers::IdentityResolution.resolve_refs(body: body, headers: headers)
-              canon = Helpers::IdentityResolution.canonical_name(body: body, headers: headers)
+              refs  = Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.resolve_refs(body: body, headers: headers)
+              canon = Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.canonical_name(body: body, headers: headers)
               skill = body[:skill] || {}
 
               {
@@ -66,7 +66,7 @@ module Legion
               conv_ref = body[:conversation_id] || headers['x-legion-llm-conversation-id']
               return nil unless conv_ref # rubocop:disable Legion/Extension/RunnerReturnHash
 
-              conv = Runners::Conversations.fetch(ref: conv_ref)
+              conv = Legion::Extensions::Llm::Ledger::Runners::Conversations.fetch(ref: conv_ref)
               conv&.[](:id)
             end
 

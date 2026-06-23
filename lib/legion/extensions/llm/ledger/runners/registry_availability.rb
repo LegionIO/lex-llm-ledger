@@ -40,8 +40,8 @@ module Legion
               offering = body[:offering] || {}
               runtime  = body[:runtime] || {}
               lane     = body[:lane]
-              refs     = Helpers::IdentityResolution.resolve_refs(body: body, headers: headers)
-              canon    = Helpers::IdentityResolution.canonical_name(body: body, headers: headers)
+              refs     = Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.resolve_refs(body: body, headers: headers)
+              canon    = Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.canonical_name(body: body, headers: headers)
 
               {
                 event_id:                body[:event_id],

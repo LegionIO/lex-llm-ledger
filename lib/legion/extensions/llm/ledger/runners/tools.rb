@@ -73,10 +73,10 @@ module Legion
                                   props[:correlation_id] || headers['x-legion-llm-request-id']
               return nil unless request_reference
 
-              request = Runners::Requests.fetch(ref: request_reference)
+              request = Legion::Extensions::Llm::Ledger::Runners::Requests.fetch(ref: request_reference)
               return nil unless request
 
-              Runners::Responses.fetch(request_id: request[:id])
+              Legion::Extensions::Llm::Ledger::Runners::Responses.fetch(request_id: request[:id])
             end
 
             # ─── Tool Record Persistence ───────────────────────────────────
@@ -201,7 +201,7 @@ module Legion
             # ─── Identity ──────────────────────────────────────────────────
 
             def resolve_identity_attrs(body, headers)
-              refs = Helpers::IdentityResolution.resolve_refs(body: body, headers: headers)
+              refs = Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.resolve_refs(body: body, headers: headers)
               canonical = refs[:canonical_name]
 
               {
@@ -216,7 +216,7 @@ module Legion
                                        headers['x-legion-llm-conversation-id']
               return nil unless conversation_reference
 
-              conversation = Runners::Conversations.fetch(ref: conversation_reference)
+              conversation = Legion::Extensions::Llm::Ledger::Runners::Conversations.fetch(ref: conversation_reference)
               conversation&.[](:id)
             end
 

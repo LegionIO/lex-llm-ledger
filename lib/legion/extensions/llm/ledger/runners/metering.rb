@@ -23,9 +23,9 @@ module Legion
             # or a flat message hash from the Subscription actor dispatch.
             def insert(payload: nil, metadata: nil, **message)
               if payload
-                Runners::Prompts.write_metering(payload: payload, metadata: metadata || {})
+                Legion::Extensions::Llm::Ledger::Runners::Prompts.write_metering(payload: payload, metadata: metadata || {})
               else
-                Runners::Prompts.write_metering(payload: message, metadata: { headers: extract_headers(message) })
+                Legion::Extensions::Llm::Ledger::Runners::Prompts.write_metering(payload: message, metadata: { headers: extract_headers(message) })
               end
             end
 
@@ -44,10 +44,10 @@ module Legion
             def find(request_ref:, **)
               return { result: :not_found } unless request_ref
 
-              request = Runners::Requests.fetch(ref: request_ref)
+              request = Legion::Extensions::Llm::Ledger::Runners::Requests.fetch(ref: request_ref)
               return { result: :not_found } unless request
 
-              metric = Runners::Metrics.fetch(request_id: request[:id])
+              metric = Legion::Extensions::Llm::Ledger::Runners::Metrics.fetch(request_id: request[:id])
               return { result: :not_found } unless metric
 
               { result: :ok, metric: metric.to_h }

@@ -73,7 +73,7 @@ module Legion
             def link(response_message_id:, response_id:, **)
               return { result: :ok } unless response_message_id && response_id
 
-              message = Runners::Messages.fetch(id: response_message_id)
+              message = Legion::Extensions::Llm::Ledger::Runners::Messages.fetch(id: response_message_id)
               return { result: :ok } unless message && message[:message_inference_response_id] != response_id
 
               message.update(message_inference_response_id: response_id)
@@ -164,7 +164,7 @@ module Legion
 
             def find_or_create_conversation(body, _headers)
               uuid = stable_uuid(reference(body, :conversation_id) || 'default-conversation')
-              Runners::Conversations.find_or_create(
+              record = Legion::Extensions::Llm::Ledger::Runners::Conversations.find_or_create(
                 uuid:  uuid,
                 attrs: {
                   title:                   body[:title] || body[:conversation_title],
@@ -175,20 +175,22 @@ module Legion
                   jurisdictions_json:      json_dump(Array(body.dig(:classification, :jurisdictions) || body[:jurisdictions])),
                   retention_policy:        body[:retention_policy] || 'default',
                   expires_at:              body[:expires_at],
-                  identity_canonical_name: Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
+                  identity_canonical_name: Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
                   recorded_at:             recorded_at(body),
                   inserted_at:             Time.now.utc,
                   created_at:              Time.now.utc,
                   updated_at:              Time.now.utc
                 }
               )
+              log.warn("[ledger] find_or_create_conversation returned #{record.class} for uuid=#{uuid}") unless record.is_a?(Sequel::Model)
+              record
             end
 
             def find_or_create_user_message(conversation, body, _headers)
               uuid = stable_uuid(reference(body, :message_id) || "request-message:#{request_ref(body)}")
               seq = body[:message_seq] ? integer(body[:message_seq]) : next_message_seq(conversation)
-              identity_refs = Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
-              Runners::Messages.find_or_create(
+              identity_refs = Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
+              Legion::Extensions::Llm::Ledger::Runners::Messages.find_or_create(
                 uuid:  uuid,
                 attrs: {
                   conversation_id:         conversation[:id],
@@ -200,7 +202,7 @@ module Legion
                   output_tokens:           0,
                   identity_principal_id:   identity_refs[:principal_id],
                   identity_id:             identity_refs[:identity_id],
-                  identity_canonical_name: Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
+                  identity_canonical_name: Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
                   created_at:              recorded_at(body),
                   inserted_at:             Time.now.utc
                 }
@@ -209,15 +211,16 @@ module Legion
 
             def find_or_create_request(conversation, latest_message, body, _headers)
               ref = request_ref(body)
-              existing = Runners::Requests.fetch(ref: ref)
+              existing = Legion::Extensions::Llm::Ledger::Runners::Requests.fetch(ref: ref)
               return enrich_request!(existing, body, latest_message) if existing
 
               raise "find_or_create_request: conversation is #{conversation.class}: #{conversation.inspect[0, 200]}" unless conversation.is_a?(Sequel::Model)
+
               conv_id = conversation[:id]
 
               op = operation(body)
-              identity_refs = Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
-              record = Runners::Requests.find_or_create(
+              identity_refs = Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
+              record = Legion::Extensions::Llm::Ledger::Runners::Requests.find_or_create(
                 uuid:  stable_uuid(ref),
                 attrs: {
                   conversation_id:         conv_id,
@@ -225,7 +228,7 @@ module Legion
                   parent_request_id:       resolve_parent_request_id(body),
                   caller_principal_id:     identity_refs[:principal_id],
                   caller_identity_id:      identity_refs[:identity_id],
-                  identity_canonical_name: Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
+                  identity_canonical_name: Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
                   runtime_caller_type:     caller_type(body),
                   runtime_caller_class:    runtime_caller_class(body),
                   runtime_caller_client:   runtime_caller_client(body),
@@ -258,10 +261,10 @@ module Legion
 
             def find_or_create_response_message(conversation, request, body, _headers)
               uuid = stable_uuid(reference(body, :response_message_id) || "response-message:#{request_ref(body)}")
-              latest = Runners::Messages.fetch(id: request[:latest_message_id])
+              latest = Legion::Extensions::Llm::Ledger::Runners::Messages.fetch(id: request[:latest_message_id])
               seq = (latest&.[](:seq) || 1) + 1
-              identity_refs = Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
-              Runners::Messages.find_or_create(
+              identity_refs = Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
+              Legion::Extensions::Llm::Ledger::Runners::Messages.find_or_create(
                 uuid:  uuid,
                 attrs: {
                   conversation_id:              conversation[:id],
@@ -275,7 +278,7 @@ module Legion
                   output_tokens:                token_count(body, :output_tokens),
                   identity_principal_id:        identity_refs[:principal_id],
                   identity_id:                  identity_refs[:identity_id],
-                  identity_canonical_name:      Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
+                  identity_canonical_name:      Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
                   created_at:                   recorded_at(body),
                   inserted_at:                  Time.now.utc
                 }
@@ -286,8 +289,8 @@ module Legion
               response_ref = reference(body, :provider_response_ref) ||
                              "response:#{request_ref(body)}:#{provider(body).to_s.empty? ? 'unknown' : provider(body)}"
               response_uuid = stable_uuid(response_ref)
-              existing = Runners::Responses.fetch(uuid: response_uuid)
-              existing ||= Runners::Responses.fetch(request_id: request[:id])
+              existing = Legion::Extensions::Llm::Ledger::Runners::Responses.fetch(uuid: response_uuid)
+              existing ||= Legion::Extensions::Llm::Ledger::Runners::Responses.fetch(request_id: request[:id])
 
               if existing
                 enrich_response!(existing, response_message, body)
@@ -297,9 +300,9 @@ module Legion
               vis = visible_response(body)
               thinking = thinking_response(body)
               is_phi = body[:contains_phi] || false
-              identity_refs = Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
+              identity_refs = Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
 
-              record = Runners::Responses.find_or_create(
+              record = Legion::Extensions::Llm::Ledger::Runners::Responses.find_or_create(
                 uuid:  response_uuid,
                 attrs: {
                   message_inference_request_id: request[:id],
@@ -326,7 +329,7 @@ module Legion
                   escalation_chain_ref:         body[:escalation_chain_ref],
                   identity_principal_id:        identity_refs[:principal_id],
                   identity_id:                  identity_refs[:identity_id],
-                  identity_canonical_name:      Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
+                  identity_canonical_name:      Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
                   responded_at:                 recorded_at(body),
                   inserted_at:                  Time.now.utc
                 }
@@ -338,14 +341,14 @@ module Legion
 
             def find_or_create_metric(request, response, body)
               metric_uuid = stable_uuid(reference(body, :metric_id, :metric_ref) || "metric:#{request_ref(body)}")
-              existing = Runners::Metrics.fetch(uuid: metric_uuid)
+              existing = Legion::Extensions::Llm::Ledger::Runners::Metrics.fetch(uuid: metric_uuid)
               if existing
                 enrich_metric_context_accounting!(existing, body)
                 return existing
               end
 
-              identity_refs = Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
-              record = Runners::Metrics.find_or_create(
+              identity_refs = Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
+              record = Legion::Extensions::Llm::Ledger::Runners::Metrics.find_or_create(
                 uuid:  metric_uuid,
                 attrs: {
                   message_inference_request_id:  request[:id],
@@ -365,7 +368,7 @@ module Legion
                   budget_key:                    billing(body)[:budget_id] || billing(body)[:budget_key],
                   identity_principal_id:         identity_refs[:principal_id],
                   identity_id:                   identity_refs[:identity_id],
-                  identity_canonical_name:       Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
+                  identity_canonical_name:       Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
                   recorded_at:                   recorded_at(body),
                   inserted_at:                   Time.now.utc
                 }.merge(context_accounting_metric_columns(body))
@@ -381,7 +384,8 @@ module Legion
               update_if_missing(updates, existing, :latest_message_id, latest_message&.[](:id))
               update_if_missing(updates, existing, :runtime_caller_class, runtime_caller_class(body))
               update_if_missing(updates, existing, :runtime_caller_client, runtime_caller_client(body))
-              update_if_missing(updates, existing, :identity_canonical_name, Helpers::IdentityResolution.canonical_name(body: body, headers: {}))
+              update_if_missing(updates, existing, :identity_canonical_name,
+                                Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.canonical_name(body: body, headers: {}))
               update_if_missing(updates, existing, :request_content_hash, resolve_request_content_hash(body))
 
               rj = request_payload(body) ? storage_json_dump(request_payload(body)) : nil
@@ -400,7 +404,8 @@ module Legion
               update_if_missing(updates, existing, :provider_instance, provider_instance(body))
               update_if_missing(updates, existing, :finish_reason, finish_reason(body))
               update_if_missing(updates, existing, :dispatch_path, body[:dispatch_path] || body[:tier])
-              update_if_missing(updates, existing, :identity_canonical_name, Helpers::IdentityResolution.canonical_name(body: body, headers: {}))
+              update_if_missing(updates, existing, :identity_canonical_name,
+                                Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.canonical_name(body: body, headers: {}))
               update_if_missing(updates, existing, :response_content_hash, resolve_response_content_hash(body))
 
               vis = visible_response(body)
@@ -463,14 +468,14 @@ module Legion
               attempts = Array(body[:route_attempt_details])
               return if attempts.empty?
 
-              identity_refs = Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
+              identity_refs = Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
               attempts.each_with_index do |attempt, idx|
                 next unless attempt.is_a?(Hash)
 
                 attempt_no = (attempt[:attempt_no] || (idx + 1)).to_i
                 uuid = stable_uuid("#{request[:uuid]}:attempt:#{attempt_no}")
 
-                Runners::RouteAttempts.insert(
+                Legion::Extensions::Llm::Ledger::Runners::RouteAttempts.insert(
                   uuid:  uuid,
                   attrs: {
                     message_inference_request_id:  request[:id],
@@ -490,7 +495,7 @@ module Legion
                     ended_at:                      attempt[:ended_at],
                     identity_principal_id:         identity_refs[:principal_id],
                     identity_id:                   identity_refs[:identity_id],
-                    identity_canonical_name:       Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
+                    identity_canonical_name:       Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
                     inserted_at:                   Time.now.utc
                   }
                 )
@@ -513,7 +518,7 @@ module Legion
                 normalized = event.transform_keys { |key| key.respond_to?(:to_sym) ? key.to_sym : key }
                 event_uuid = stable_uuid("context-accounting:#{request_reference}:#{index}:#{normalized[:event_type]}:#{normalized[:component]}")
 
-                Runners::ContextAccountingEvents.insert(
+                Legion::Extensions::Llm::Ledger::Runners::ContextAccountingEvents.insert(
                   uuid:  event_uuid,
                   attrs: {
                     message_inference_request_id:  request[:id],
@@ -638,7 +643,7 @@ module Legion
                          body.dig(:identity, :type) ||
                          body.dig(:caller, :requested_by, :type) ||
                          body.dig(:caller, :source)
-              return Helpers::IdentityResolution.normalize_caller(body: body, headers: {})[:type] if present?(raw_type)
+              return Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.normalize_caller(body: body, headers: {})[:type] if present?(raw_type)
 
               nil
             end
@@ -800,7 +805,7 @@ module Legion
               if parent_ref.is_a?(Integer)
                 parent_ref
               else
-                parent = Runners::Requests.fetch(ref: parent_ref.to_s)
+                parent = Legion::Extensions::Llm::Ledger::Runners::Requests.fetch(ref: parent_ref.to_s)
                 parent&.[](:id)
               end
             end
@@ -888,7 +893,7 @@ module Legion
             end
 
             def official_identity_payload(body, headers)
-              normalized = Helpers::IdentityResolution.normalize_caller(body: body, headers: headers)
+              normalized = Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.normalize_caller(body: body, headers: headers)
               {
                 caller_identity:       normalized[:identity],
                 caller_type:           normalized[:type],

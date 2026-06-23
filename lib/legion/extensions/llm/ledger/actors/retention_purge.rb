@@ -7,7 +7,7 @@ module Legion
         module Actor
           class RetentionPurge < Legion::Extensions::Actors::Every
             def runner_class
-              'Legion::Extensions::Llm::Ledger::Runners::RetentionPurge'
+              'Legion::Extensions::Llm::Ledger::Legion::Extensions::Llm::Ledger::Runners::RetentionPurge'
             end
 
             def runner_function
@@ -19,7 +19,7 @@ module Legion
             end
 
             def run
-              Runners::RetentionPurge.purge_expired
+              Legion::Extensions::Llm::Ledger::Runners::RetentionPurge.purge_expired
             rescue StandardError => e
               handle_exception(e, level: :warn, handled: true, operation: 'retention_purge')
             end
