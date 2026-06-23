@@ -30,8 +30,9 @@ module Legion
               return nil if existing
 
               record = Legion::Data::Models::LLM::RouteAttempt.create(attrs.merge(uuid: uuid))
-              cache_record(record)
-              record
+              result = record.values
+              cache_record(result)
+              result
             rescue Sequel::UniqueConstraintViolation => e
               handle_exception(e, level: :warn, handled: true, operation: 'route_attempts.race')
               nil
@@ -56,8 +57,10 @@ module Legion
               end
 
               record = Legion::Data::Models::LLM::RouteAttempt[id]
-              cache_record(record) if record
-              record
+              return nil unless record
+              result = record.values
+              cache_record(result)
+              result
             end
 
             def by_uuid(uuid)
@@ -67,15 +70,17 @@ module Legion
               end
 
               record = Legion::Data::Models::LLM::RouteAttempt.first(uuid: uuid)
-              cache_record(record) if record
-              record
+              return nil unless record
+              result = record.values
+              cache_record(result)
+              result
             end
 
-            def cache_record(record)
-              return unless cache_available? && record
+            def cache_record(result)
+              return unless cache_available? && result
 
-              cache_set("ledger:route:id:#{record[:id]}", record, ttl: CACHE_TTL)
-              cache_set("ledger:route:uuid:#{record[:uuid]}", record, ttl: CACHE_TTL)
+              cache_set("ledger:route:id:#{result[:id]}", result, ttl: CACHE_TTL)
+              cache_set("ledger:route:uuid:#{result[:uuid]}", result, ttl: CACHE_TTL)
             end
 
             # rubocop:enable Legion/Extension/RunnerReturnHash

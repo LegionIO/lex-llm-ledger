@@ -32,8 +32,9 @@ module Legion
               return existing if existing
 
               record = Legion::Data::Models::LLM::MessageInferenceRequest.create(attrs.merge(uuid: uuid))
-              cache_record(record)
-              record
+              result = record.values
+              cache_record(result)
+              result
             rescue Sequel::UniqueConstraintViolation => e
               handle_exception(e, level: :warn, handled: true, operation: 'requests.find_or_create_race')
               fetch(uuid: uuid)
@@ -59,8 +60,10 @@ module Legion
               end
 
               record = Legion::Data::Models::LLM::MessageInferenceRequest[id]
-              cache_record(record) if record
-              record
+              return nil unless record
+              result = record.values
+              cache_record(result)
+              result
             end
 
             def by_uuid(uuid)
@@ -70,8 +73,10 @@ module Legion
               end
 
               record = Legion::Data::Models::LLM::MessageInferenceRequest.first(uuid: uuid)
-              cache_record(record) if record
-              record
+              return nil unless record
+              result = record.values
+              cache_record(result)
+              result
             end
 
             def by_ref(ref)
@@ -81,12 +86,16 @@ module Legion
               end
 
               record = Legion::Data::Models::LLM::MessageInferenceRequest.first(request_ref: ref)
+              return nil unless record
+              result = record.values
               unless record
                 derived = stable_uuid(ref)
                 record = Legion::Data::Models::LLM::MessageInferenceRequest.first(uuid: derived)
+              return nil unless record
+              result = record.values
               end
-              cache_record(record) if record
-              record
+              cache_record(result)
+              result
             end
 
             def stable_uuid(value)
@@ -97,12 +106,12 @@ module Legion
               "#{hex[0, 8]}-#{hex[8, 4]}-#{hex[12, 4]}-#{hex[16, 4]}-#{hex[20, 12]}"
             end
 
-            def cache_record(record)
-              return unless cache_available? && record
+            def cache_record(result)
+              return unless cache_available? && result
 
-              cache_set("ledger:req:id:#{record[:id]}", record, ttl: CACHE_TTL)
-              cache_set("ledger:req:uuid:#{record[:uuid]}", record, ttl: CACHE_TTL)
-              cache_set("ledger:req:ref:#{record[:request_ref]}", record, ttl: CACHE_TTL) if record[:request_ref]
+              cache_set("ledger:req:id:#{result[:id]}", result, ttl: CACHE_TTL)
+              cache_set("ledger:req:uuid:#{result[:uuid]}", result, ttl: CACHE_TTL)
+              cache_set("ledger:req:ref:#{result[:request_ref]}", result, ttl: CACHE_TTL) if result[:request_ref]
             end
 
             # rubocop:enable Legion/Extension/RunnerReturnHash

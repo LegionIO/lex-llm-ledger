@@ -64,7 +64,7 @@ module Legion
                 end
               end
 
-              log.info('[ledger] tools: response not available after retries, proceeding with null response_id')
+              log.warn("[ledger] tools: response not available after retries, proceeding with null response_id")
               nil
             end
 
@@ -119,7 +119,7 @@ module Legion
               return [existing, false] if existing
 
               response_id = response&.[](:id)
-              next_index  = response ? response.tool_calls_dataset.max(:tool_call_index).to_i + 1 : 0
+              next_index  = response ? Legion::Data::Models::LLM::ToolCall.where(message_inference_response_id: response[:id]).max(:tool_call_index).to_i + 1 : 0
               tool_source = tool[:source] || {}
               status      = tool[:status] || headers['x-legion-tool-status'] || 'success'
               timestamps  = body[:timestamps] || {}

@@ -182,7 +182,6 @@ module Legion
                   updated_at:              Time.now.utc
                 }
               )
-              log.warn("[ledger] find_or_create_conversation returned #{record.class} for uuid=#{uuid}") unless record.is_a?(Sequel::Model)
               record
             end
 
@@ -214,7 +213,6 @@ module Legion
               existing = Legion::Extensions::Llm::Ledger::Runners::Requests.fetch(ref: ref)
               return enrich_request!(existing, body, latest_message) if existing
 
-              raise "find_or_create_request: conversation is #{conversation.class}: #{conversation.inspect[0, 200]}" unless conversation.is_a?(Sequel::Model)
 
               conv_id = conversation[:id]
 
@@ -860,7 +858,7 @@ module Legion
             # ─── Sequence / Utility ────────────────────────────────────────
 
             def next_message_seq(conversation)
-              conversation.messages_dataset.max(:seq).to_i + 1
+              Legion::Data::Models::LLM::Message.where(conversation_id: conversation[:id]).max(:seq).to_i + 1
             end
 
             def reference(body, *keys)

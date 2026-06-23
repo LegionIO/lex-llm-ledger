@@ -31,8 +31,9 @@ module Legion
               return existing if existing
 
               record = Legion::Data::Models::LLM::MessageInferenceResponse.create(attrs.merge(uuid: uuid))
-              cache_record(record)
-              record
+              result = record.values
+              cache_record(result)
+              result
             rescue Sequel::UniqueConstraintViolation => e
               handle_exception(e, level: :warn, handled: true, operation: 'responses.find_or_create_race')
               fetch(uuid: uuid)
@@ -58,8 +59,10 @@ module Legion
               end
 
               record = Legion::Data::Models::LLM::MessageInferenceResponse[id]
-              cache_record(record) if record
-              record
+              return nil unless record
+              result = record.values
+              cache_record(result)
+              result
             end
 
             def by_uuid(uuid)
@@ -69,8 +72,10 @@ module Legion
               end
 
               record = Legion::Data::Models::LLM::MessageInferenceResponse.first(uuid: uuid)
-              cache_record(record) if record
-              record
+              return nil unless record
+              result = record.values
+              cache_record(result)
+              result
             end
 
             def by_request_id(request_id)
@@ -80,16 +85,18 @@ module Legion
               end
 
               record = Legion::Data::Models::LLM::MessageInferenceResponse.first(message_inference_request_id: request_id)
-              cache_record(record) if record
-              record
+              return nil unless record
+              result = record.values
+              cache_record(result)
+              result
             end
 
-            def cache_record(record)
-              return unless cache_available? && record
+            def cache_record(result)
+              return unless cache_available? && result
 
-              cache_set("ledger:resp:id:#{record[:id]}", record, ttl: CACHE_TTL)
-              cache_set("ledger:resp:uuid:#{record[:uuid]}", record, ttl: CACHE_TTL)
-              cache_set("ledger:resp:req:#{record[:message_inference_request_id]}", record, ttl: CACHE_TTL)
+              cache_set("ledger:resp:id:#{result[:id]}", result, ttl: CACHE_TTL)
+              cache_set("ledger:resp:uuid:#{result[:uuid]}", result, ttl: CACHE_TTL)
+              cache_set("ledger:resp:req:#{result[:message_inference_request_id]}", result, ttl: CACHE_TTL)
             end
 
             # rubocop:enable Legion/Extension/RunnerReturnHash
