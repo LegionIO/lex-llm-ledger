@@ -17,7 +17,7 @@ module Legion
             extend self
             extend Legion::Logging::Helper
 
-            def insert(payload:, metadata: {}, **_opts)
+            def insert(payload:, metadata: {}, **)
               headers = metadata[:headers] || {}
               props   = metadata[:properties] || {}
               body    = payload.is_a?(Hash) ? payload : {}

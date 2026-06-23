@@ -33,7 +33,7 @@ module Legion
             # ─── Public API ────────────────────────────────────────────────
 
             # Full lifecycle write from audit.prompt queue.
-            def insert(payload:, metadata: {}, **_opts)
+            def insert(payload:, metadata: {}, **)
               headers = metadata[:headers] || {}
               body = resolve_body(payload, metadata)
               body = merge_official_fields(body, metadata, headers)
@@ -52,7 +52,7 @@ module Legion
 
             # Metering subset: conversation -> request -> response -> metric (NO messages).
             # Called by the Metering runner.
-            def write_metering(payload:, metadata: {}, **_opts)
+            def write_metering(payload:, metadata: {}, **)
               headers = metadata[:headers] || {}
               body = resolve_body(payload, metadata)
               body = merge_official_fields(body, metadata, headers)
@@ -66,7 +66,7 @@ module Legion
             end
 
             # FK backfill: link a response message row to an inference response row.
-            def link(response_message_id:, response_id:, **_opts)
+            def link(response_message_id:, response_id:, **)
               return { result: :ok } unless response_message_id && response_id
 
               message = Runners::Messages.fetch(id: response_message_id)

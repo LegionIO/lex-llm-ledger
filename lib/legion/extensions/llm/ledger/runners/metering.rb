@@ -18,12 +18,12 @@ module Legion
             # Persist a metering record into the official lifecycle schema.
             # Delegates to Prompts.write_metering which handles conversation ->
             # request -> response -> metric without creating message rows.
-            def insert(payload:, metadata: {}, **_opts)
+            def insert(payload:, metadata: {}, **)
               Runners::Prompts.write_metering(payload: payload, metadata: metadata)
             end
 
             # Look up a metric by request reference.
-            def find(request_ref:, **_opts)
+            def find(request_ref:, **)
               return { result: :not_found } unless request_ref
 
               request = Runners::Requests.fetch(ref: request_ref)

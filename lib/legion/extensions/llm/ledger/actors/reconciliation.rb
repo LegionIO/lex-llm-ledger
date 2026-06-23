@@ -5,7 +5,7 @@ module Legion
     module Llm
       module Ledger
         module Actor
-          class Reconciliation < Legion::Extensions::Actors::Every # rubocop:disable Legion/Extension/EveryActorRequiresTime
+          class Reconciliation < Legion::Extensions::Actors::Every
             def runner_class
               'Legion::Extensions::Llm::Ledger::Runners::Reconciliation'
             end

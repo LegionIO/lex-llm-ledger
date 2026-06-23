@@ -23,7 +23,7 @@ module Legion
 
             # ─── Public API ────────────────────────────────────────────────
 
-            def insert(payload:, metadata: {}, **_opts)
+            def insert(payload:, metadata: {}, **)
               headers = metadata[:headers] || {}
               props   = metadata[:properties] || {}
 
