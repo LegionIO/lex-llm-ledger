@@ -161,7 +161,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Tools do
 
     it 'raises on non-terminal persistence failure so the delivery can retry' do
       seed_inference_response
-      allow(Legion::Extensions::Llm::Ledger::Helpers::ToolPersistence).to receive(:write_tool_record)
+      allow(Legion::Data::Models::LLM::ToolCall).to receive(:create)
         .and_raise(Sequel::DatabaseError, 'database down')
 
       expect do
