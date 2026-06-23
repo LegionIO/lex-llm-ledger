@@ -116,32 +116,24 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::Metering do
         'x-legion-caller-type' => 'human'
       }
 
-      official_payload = described_class.send(
-        :official_metering_payload,
-        payload,
-        payload[:message_context],
-        metadata[:properties],
-        metadata[:headers]
-      )
+      result = described_class.insert(payload: payload, metadata: metadata)
+      expect(result[:result]).to eq(:ok)
 
-      expect(official_payload[:caller_identity]).to eq('matt@example.com')
-      expect(official_payload[:caller_type]).to eq('human')
+      row = Legion::Data::Models::LLM::MessageInferenceRequest.first
+      expect(row[:identity_canonical_name]).to eq('matt@example.com')
+      expect(row[:runtime_caller_type]).to eq('human')
     end
 
     it 'prefers normalized event identity over ambiguous display identity' do
       payload[:caller] = { requested_by: { identity: 'system', type: 'service' } }
       payload[:identity] = { identity: 'matt@example.com', type: 'human' }
 
-      official_payload = described_class.send(
-        :official_metering_payload,
-        payload,
-        payload[:message_context],
-        metadata[:properties],
-        metadata[:headers]
-      )
+      result = described_class.insert(payload: payload, metadata: metadata)
+      expect(result[:result]).to eq(:ok)
 
-      expect(official_payload[:caller_identity]).to eq('matt@example.com')
-      expect(official_payload[:caller_type]).to eq('human')
+      row = Legion::Data::Models::LLM::MessageInferenceRequest.first
+      expect(row[:identity_canonical_name]).to eq('matt@example.com')
+      expect(row[:runtime_caller_type]).to eq('human')
     end
   end
 
