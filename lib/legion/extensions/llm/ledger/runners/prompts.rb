@@ -69,7 +69,7 @@ module Legion
             def link(response_message_id:, response_id:, **_opts)
               return { result: :ok } unless response_message_id && response_id
 
-              message = Legion::Data::Models::LLM::Message[response_message_id]
+              message = Runners::Messages.fetch(id: response_message_id)
               return { result: :ok } unless message && message[:message_inference_response_id] != response_id
 
               message.update(message_inference_response_id: response_id)
@@ -147,7 +147,7 @@ module Legion
             def find_or_create_conversation(body, _headers)
               uuid = stable_uuid(reference(body, :conversation_id) || 'default-conversation')
               Runners::Conversations.find_or_create(
-                uuid: uuid,
+                uuid:  uuid,
                 attrs: {
                   title:                   body[:title] || body[:conversation_title],
                   classification_level:    classification_level(body),
@@ -168,117 +168,105 @@ module Legion
 
             def find_or_create_user_message(conversation, body, _headers)
               uuid = stable_uuid(reference(body, :message_id) || "request-message:#{request_ref(body)}")
-              existing = Legion::Data::Models::LLM::Message.first(uuid: uuid)
-              return existing if existing
-
               seq = body[:message_seq] ? integer(body[:message_seq]) : next_message_seq(conversation)
               identity_refs = Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
-              Legion::Data::Models::LLM::Message.create(
-                uuid:                    uuid,
-                conversation_id:         conversation[:id],
-                seq:                     seq,
-                role:                    'user',
-                content_type:            'text',
-                content:                 request_content(body),
-                input_tokens:            tokens(body)[:input_tokens],
-                output_tokens:           0,
-                identity_principal_id:   identity_refs[:principal_id],
-                identity_id:             identity_refs[:identity_id],
-                identity_canonical_name: Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
-                created_at:              recorded_at(body),
-                inserted_at:             Time.now.utc
+              Runners::Messages.find_or_create(
+                uuid:  uuid,
+                attrs: {
+                  conversation_id:         conversation[:id],
+                  seq:                     seq,
+                  role:                    'user',
+                  content_type:            'text',
+                  content:                 request_content(body),
+                  input_tokens:            tokens(body)[:input_tokens],
+                  output_tokens:           0,
+                  identity_principal_id:   identity_refs[:principal_id],
+                  identity_id:             identity_refs[:identity_id],
+                  identity_canonical_name: Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
+                  created_at:              recorded_at(body),
+                  inserted_at:             Time.now.utc
+                }
               )
-            rescue Sequel::UniqueConstraintViolation => e
-              handle_exception(e, level: :debug, handled: true, operation: 'prompts.user_message_race')
-              Legion::Data::Models::LLM::Message.first(uuid: uuid) ||
-                Legion::Data::Models::LLM::Message.first(conversation_id: conversation[:id], seq: seq)
             end
 
             def find_or_create_request(conversation, latest_message, body, _headers)
               ref = request_ref(body)
-              existing = Legion::Data::Models::LLM::MessageInferenceRequest.lookup(ref)
+              existing = Runners::Requests.fetch(ref: ref)
               return enrich_request!(existing, body, latest_message) if existing
 
               op = operation(body)
               identity_refs = Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
-              Legion::Data::Models::LLM::MessageInferenceRequest.create(
-                uuid:                    stable_uuid(ref),
-                conversation_id:         conversation[:id],
-                latest_message_id:       latest_message&.[](:id),
-                parent_request_id:       resolve_parent_request_id(body),
-                caller_principal_id:     identity_refs[:principal_id],
-                caller_identity_id:      identity_refs[:identity_id],
-                identity_canonical_name: Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
-                runtime_caller_type:     caller_type(body),
-                runtime_caller_class:    runtime_caller_class(body),
-                runtime_caller_client:   runtime_caller_client(body),
-                request_ref:             ref,
-                correlation_ref:         correlation_id(body),
-                correlation_id:          correlation_id(body),
-                exchange_ref:            body[:exchange_id],
-                request_type:            op,
-                operation:               op,
-                idempotency_key:         body[:idempotency_key] || ref,
-                status:                  'responded',
-                context_message_count:   Array(body.dig(:request, :messages) || body[:messages]).size,
-                request_capture_mode:    'full',
-                request_json:            request_payload_json(body),
-                classification_level:    classification_level(body),
-                cost_center:             billing(body)[:cost_center],
-                budget_key:              billing(body)[:budget_id] || billing(body)[:budget_key],
-                injected_tool_count:     Array(body.dig(:audit, :injected_tools) || body[:injected_tools]).size,
-                context_tokens:          body[:context_tokens] || body.dig(:tokens, :context_tokens),
-                request_content_hash:    resolve_request_content_hash(body),
-                curation_strategy:       body[:curation_strategy] || body.dig(:audit, :curation_strategy),
-                tool_policy:             body[:tool_policy] || body.dig(:audit, :tool_policy),
-                requested_at:            recorded_at(body),
-                inserted_at:             Time.now.utc
+              record = Runners::Requests.find_or_create(
+                uuid:  stable_uuid(ref),
+                attrs: {
+                  conversation_id:         conversation[:id],
+                  latest_message_id:       latest_message&.[](:id),
+                  parent_request_id:       resolve_parent_request_id(body),
+                  caller_principal_id:     identity_refs[:principal_id],
+                  caller_identity_id:      identity_refs[:identity_id],
+                  identity_canonical_name: Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
+                  runtime_caller_type:     caller_type(body),
+                  runtime_caller_class:    runtime_caller_class(body),
+                  runtime_caller_client:   runtime_caller_client(body),
+                  request_ref:             ref,
+                  correlation_ref:         correlation_id(body),
+                  correlation_id:          correlation_id(body),
+                  exchange_ref:            body[:exchange_id],
+                  request_type:            op,
+                  operation:               op,
+                  idempotency_key:         body[:idempotency_key] || ref,
+                  status:                  'responded',
+                  context_message_count:   Array(body.dig(:request, :messages) || body[:messages]).size,
+                  request_capture_mode:    'full',
+                  request_json:            request_payload_json(body),
+                  classification_level:    classification_level(body),
+                  cost_center:             billing(body)[:cost_center],
+                  budget_key:              billing(body)[:budget_id] || billing(body)[:budget_key],
+                  injected_tool_count:     Array(body.dig(:audit, :injected_tools) || body[:injected_tools]).size,
+                  context_tokens:          body[:context_tokens] || body.dig(:tokens, :context_tokens),
+                  request_content_hash:    resolve_request_content_hash(body),
+                  curation_strategy:       body[:curation_strategy] || body.dig(:audit, :curation_strategy),
+                  tool_policy:             body[:tool_policy] || body.dig(:audit, :tool_policy),
+                  requested_at:            recorded_at(body),
+                  inserted_at:             Time.now.utc
+                }
               )
-            rescue Sequel::UniqueConstraintViolation => e
-              handle_exception(e, level: :debug, handled: true, operation: 'prompts.request_race')
-              existing = Legion::Data::Models::LLM::MessageInferenceRequest.lookup(ref)
-              return enrich_request!(existing, body, latest_message) if existing
-
-              raise
+              # If find_or_create returned a pre-existing record (race), enrich it
+              enrich_request!(record, body, latest_message)
             end
 
             def find_or_create_response_message(conversation, request, body, _headers)
               uuid = stable_uuid(reference(body, :response_message_id) || "response-message:#{request_ref(body)}")
-              existing = Legion::Data::Models::LLM::Message.first(uuid: uuid)
-              return existing if existing
-
-              latest = Legion::Data::Models::LLM::Message[request[:latest_message_id]]
+              latest = Runners::Messages.fetch(id: request[:latest_message_id])
               seq = (latest&.[](:seq) || 1) + 1
               identity_refs = Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
-              Legion::Data::Models::LLM::Message.create(
-                uuid:                         uuid,
-                conversation_id:              conversation[:id],
-                parent_message_id:            latest&.[](:id),
-                message_inference_request_id: request[:id],
-                seq:                          seq,
-                role:                         'assistant',
-                content_type:                 'text',
-                content:                      response_content(body),
-                input_tokens:                 0,
-                output_tokens:                token_count(body, :output_tokens),
-                identity_principal_id:        identity_refs[:principal_id],
-                identity_id:                  identity_refs[:identity_id],
-                identity_canonical_name:      Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
-                created_at:                   recorded_at(body),
-                inserted_at:                  Time.now.utc
+              Runners::Messages.find_or_create(
+                uuid:  uuid,
+                attrs: {
+                  conversation_id:              conversation[:id],
+                  parent_message_id:            latest&.[](:id),
+                  message_inference_request_id: request[:id],
+                  seq:                          seq,
+                  role:                         'assistant',
+                  content_type:                 'text',
+                  content:                      response_content(body),
+                  input_tokens:                 0,
+                  output_tokens:                token_count(body, :output_tokens),
+                  identity_principal_id:        identity_refs[:principal_id],
+                  identity_id:                  identity_refs[:identity_id],
+                  identity_canonical_name:      Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
+                  created_at:                   recorded_at(body),
+                  inserted_at:                  Time.now.utc
+                }
               )
-            rescue Sequel::UniqueConstraintViolation => e
-              handle_exception(e, level: :debug, handled: true, operation: 'prompts.response_message_race')
-              Legion::Data::Models::LLM::Message.first(uuid: uuid) ||
-                Legion::Data::Models::LLM::Message.first(conversation_id: conversation[:id], seq: seq)
             end
 
             def find_or_create_response(request, response_message, body, _headers)
               response_ref = reference(body, :provider_response_ref) ||
                              "response:#{request_ref(body)}:#{provider(body).to_s.empty? ? 'unknown' : provider(body)}"
               response_uuid = stable_uuid(response_ref)
-              existing = Legion::Data::Models::LLM::MessageInferenceResponse.first(uuid: response_uuid)
-              existing ||= request.message_inference_responses_dataset.first
+              existing = Runners::Responses.fetch(uuid: response_uuid)
+              existing ||= Runners::Responses.fetch(request_id: request[:id])
 
               if existing
                 enrich_response!(existing, response_message, body)
@@ -290,58 +278,55 @@ module Legion
               is_phi = body[:contains_phi] || false
               identity_refs = Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
 
-              Legion::Data::Models::LLM::MessageInferenceResponse.create(
-                uuid:                         response_uuid,
-                message_inference_request_id: request[:id],
-                response_message_id:          response_message&.[](:id),
-                provider:                     provider(body),
-                provider_instance:            provider_instance(body),
-                model_key:                    model_id(body),
-                tier:                         tier(body),
-                runner_ref:                   body[:worker_id] || body[:runner_ref],
-                provider_response_ref:        body[:provider_response_ref],
-                status:                       body[:error] ? 'error' : 'success',
-                finish_reason:                finish_reason(body),
-                latency_ms:                   integer(body[:latency_ms]),
-                wall_clock_ms:                integer(body[:wall_clock_ms]),
-                response_capture_mode:        'full',
-                response_json:                vis ? phi_protect(storage_json_dump(vis), is_phi) : nil,
-                response_thinking_json:       thinking ? phi_protect(storage_json_dump(thinking), is_phi) : nil,
-                dispatch_path:                body[:dispatch_path] || body[:tier],
-                error_category:               body[:error_category] || body.dig(:error, :category),
-                error_code:                   body[:error_code] || body.dig(:error, :code),
-                error_message:                body[:error_message] || body.dig(:error, :message),
-                response_content_hash:        resolve_response_content_hash(body),
-                route_attempts:               (body[:route_attempts] || body.dig(:audit, :route_attempts)).to_i,
-                escalation_chain_ref:         body[:escalation_chain_ref],
-                identity_principal_id:        identity_refs[:principal_id],
-                identity_id:                  identity_refs[:identity_id],
-                identity_canonical_name:      Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
-                responded_at:                 recorded_at(body),
-                inserted_at:                  Time.now.utc
+              record = Runners::Responses.find_or_create(
+                uuid:  response_uuid,
+                attrs: {
+                  message_inference_request_id: request[:id],
+                  response_message_id:          response_message&.[](:id),
+                  provider:                     provider(body),
+                  provider_instance:            provider_instance(body),
+                  model_key:                    model_id(body),
+                  tier:                         tier(body),
+                  runner_ref:                   body[:worker_id] || body[:runner_ref],
+                  provider_response_ref:        body[:provider_response_ref],
+                  status:                       body[:error] ? 'error' : 'success',
+                  finish_reason:                finish_reason(body),
+                  latency_ms:                   integer(body[:latency_ms]),
+                  wall_clock_ms:                integer(body[:wall_clock_ms]),
+                  response_capture_mode:        'full',
+                  response_json:                vis ? phi_protect(storage_json_dump(vis), is_phi) : nil,
+                  response_thinking_json:       thinking ? phi_protect(storage_json_dump(thinking), is_phi) : nil,
+                  dispatch_path:                body[:dispatch_path] || body[:tier],
+                  error_category:               body[:error_category] || body.dig(:error, :category),
+                  error_code:                   body[:error_code] || body.dig(:error, :code),
+                  error_message:                body[:error_message] || body.dig(:error, :message),
+                  response_content_hash:        resolve_response_content_hash(body),
+                  route_attempts:               (body[:route_attempts] || body.dig(:audit, :route_attempts)).to_i,
+                  escalation_chain_ref:         body[:escalation_chain_ref],
+                  identity_principal_id:        identity_refs[:principal_id],
+                  identity_id:                  identity_refs[:identity_id],
+                  identity_canonical_name:      Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
+                  responded_at:                 recorded_at(body),
+                  inserted_at:                  Time.now.utc
+                }
               )
-            rescue Sequel::UniqueConstraintViolation => e
-              handle_exception(e, level: :debug, handled: true, operation: 'prompts.response_race')
-              existing = Legion::Data::Models::LLM::MessageInferenceResponse.first(uuid: response_uuid)
-              if existing
-                enrich_response!(existing, response_message, body)
-                return existing
-              end
-              raise
+              # If find_or_create returned a pre-existing record (race), enrich it
+              enrich_response!(record, response_message, body)
+              record
             end
 
             def find_or_create_metric(request, response, body)
               metric_uuid = stable_uuid(reference(body, :metric_id, :metric_ref) || "metric:#{request_ref(body)}")
-              existing = Legion::Data::Models::LLM::MessageInferenceMetric.first(uuid: metric_uuid)
+              existing = Runners::Metrics.fetch(uuid: metric_uuid)
               if existing
                 enrich_metric_context_accounting!(existing, body)
                 return existing
               end
 
               identity_refs = Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
-              Legion::Data::Models::LLM::MessageInferenceMetric.create(
-                {
-                  uuid:                          metric_uuid,
+              record = Runners::Metrics.find_or_create(
+                uuid:  metric_uuid,
+                attrs: {
                   message_inference_request_id:  request[:id],
                   message_inference_response_id: response[:id],
                   provider:                      provider(body),
@@ -364,14 +349,8 @@ module Legion
                   inserted_at:                   Time.now.utc
                 }.merge(context_accounting_metric_columns(body))
               )
-            rescue Sequel::UniqueConstraintViolation => e
-              handle_exception(e, level: :debug, handled: true, operation: 'prompts.metric_race')
-              existing = Legion::Data::Models::LLM::MessageInferenceMetric.first(uuid: metric_uuid)
-              if existing
-                enrich_metric_context_accounting!(existing, body)
-                return existing
-              end
-              raise
+              enrich_metric_context_accounting!(record, body)
+              record
             end
 
             # ─── Enrichment ────────────────────────────────────────────────
@@ -463,36 +442,36 @@ module Legion
               attempts = Array(body[:route_attempt_details])
               return if attempts.empty?
 
+              identity_refs = Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
               attempts.each_with_index do |attempt, idx|
                 next unless attempt.is_a?(Hash)
 
                 attempt_no = (attempt[:attempt_no] || (idx + 1)).to_i
                 uuid = stable_uuid("#{request[:uuid]}:attempt:#{attempt_no}")
 
-                next if Legion::Data::Models::LLM::RouteAttempt.first(uuid: uuid)
-
-                identity_refs = Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
-                Legion::Data::Models::LLM::RouteAttempt.create(
-                  uuid:                          uuid,
-                  message_inference_request_id:  request[:id],
-                  message_inference_response_id: response[:id],
-                  attempt_no:                    attempt_no,
-                  provider:                      attempt[:provider] || body[:provider],
-                  model_key:                     attempt[:model] || attempt[:model_key] || body[:model_id],
-                  tier:                          attempt[:tier] || body[:tier],
-                  route_target:                  attempt[:route_target] || attempt[:instance],
-                  status:                        (attempt[:status] || 'success').to_s,
-                  failure_reason:                attempt[:failure_reason],
-                  latency_ms:                    (attempt[:latency_ms] || 0).to_i,
-                  operation:                     attempt[:operation],
-                  dispatch_path:                 attempt[:dispatch_path],
-                  idempotency_key:               attempt[:idempotency_key],
-                  started_at:                    attempt[:started_at],
-                  ended_at:                      attempt[:ended_at],
-                  identity_principal_id:         identity_refs[:principal_id],
-                  identity_id:                   identity_refs[:identity_id],
-                  identity_canonical_name:       Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
-                  inserted_at:                   Time.now.utc
+                Runners::RouteAttempts.insert(
+                  uuid:  uuid,
+                  attrs: {
+                    message_inference_request_id:  request[:id],
+                    message_inference_response_id: response[:id],
+                    attempt_no:                    attempt_no,
+                    provider:                      attempt[:provider] || body[:provider],
+                    model_key:                     attempt[:model] || attempt[:model_key] || body[:model_id],
+                    tier:                          attempt[:tier] || body[:tier],
+                    route_target:                  attempt[:route_target] || attempt[:instance],
+                    status:                        (attempt[:status] || 'success').to_s,
+                    failure_reason:                attempt[:failure_reason],
+                    latency_ms:                    (attempt[:latency_ms] || 0).to_i,
+                    operation:                     attempt[:operation],
+                    dispatch_path:                 attempt[:dispatch_path],
+                    idempotency_key:               attempt[:idempotency_key],
+                    started_at:                    attempt[:started_at],
+                    ended_at:                      attempt[:ended_at],
+                    identity_principal_id:         identity_refs[:principal_id],
+                    identity_id:                   identity_refs[:identity_id],
+                    identity_canonical_name:       Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
+                    inserted_at:                   Time.now.utc
+                  }
                 )
               end
             rescue StandardError => e
@@ -512,25 +491,26 @@ module Legion
               events.each_with_index do |event, index|
                 normalized = event.transform_keys { |key| key.respond_to?(:to_sym) ? key.to_sym : key }
                 event_uuid = stable_uuid("context-accounting:#{request_reference}:#{index}:#{normalized[:event_type]}:#{normalized[:component]}")
-                next if Legion::Data::Models::LLM::ContextAccountingEvent.first(uuid: event_uuid)
 
-                Legion::Data::Models::LLM::ContextAccountingEvent.create(
-                  uuid:                          event_uuid,
-                  message_inference_request_id:  request[:id],
-                  message_inference_response_id: response&.[](:id),
-                  message_inference_metric_id:   metric&.[](:id),
-                  conversation_ref:              body[:conversation_id].to_s,
-                  request_ref:                   request_reference,
-                  event_type:                    normalized[:event_type].to_s,
-                  component:                     normalized[:component].to_s,
-                  estimated_tokens_before:       normalized[:estimated_tokens_before].to_i,
-                  estimated_tokens_after:        normalized[:estimated_tokens_after].to_i,
-                  estimated_tokens_delta:        normalized[:estimated_tokens_delta].to_i,
-                  message_count_before:          normalized[:message_count_before].to_i,
-                  message_count_after:           normalized[:message_count_after].to_i,
-                  metadata_json:                 normalized[:metadata] ? json_dump(normalized[:metadata]) : nil,
-                  recorded_at:                   recorded_at(body),
-                  inserted_at:                   Time.now.utc
+                Runners::ContextAccountingEvents.insert(
+                  uuid:  event_uuid,
+                  attrs: {
+                    message_inference_request_id:  request[:id],
+                    message_inference_response_id: response&.[](:id),
+                    message_inference_metric_id:   metric&.[](:id),
+                    conversation_ref:              body[:conversation_id].to_s,
+                    request_ref:                   request_reference,
+                    event_type:                    normalized[:event_type].to_s,
+                    component:                     normalized[:component].to_s,
+                    estimated_tokens_before:       normalized[:estimated_tokens_before].to_i,
+                    estimated_tokens_after:        normalized[:estimated_tokens_after].to_i,
+                    estimated_tokens_delta:        normalized[:estimated_tokens_delta].to_i,
+                    message_count_before:          normalized[:message_count_before].to_i,
+                    message_count_after:           normalized[:message_count_after].to_i,
+                    metadata_json:                 normalized[:metadata] ? json_dump(normalized[:metadata]) : nil,
+                    recorded_at:                   recorded_at(body),
+                    inserted_at:                   Time.now.utc
+                  }
                 )
               end
             rescue StandardError => e
@@ -799,7 +779,7 @@ module Legion
               if parent_ref.is_a?(Integer)
                 parent_ref
               else
-                parent = Legion::Data::Models::LLM::MessageInferenceRequest.lookup(parent_ref.to_s)
+                parent = Runners::Requests.fetch(ref: parent_ref.to_s)
                 parent&.[](:id)
               end
             end
