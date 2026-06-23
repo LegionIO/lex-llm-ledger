@@ -2,10 +2,10 @@
 
 require 'digest'
 require 'securerandom'
+require 'legion/json'
+require 'legion/logging'
 require 'legion/data/model'
-require_relative '../helpers/caller_identity'
-require_relative '../helpers/decryption'
-require_relative '../helpers/json'
+require_relative 'identity_resolution'
 
 module Legion
   module Extensions
@@ -14,12 +14,12 @@ module Legion
         module Runners
           module Escalations
             extend self
+            extend Legion::Logging::Helper
 
             def insert(payload:, metadata: {}, **_opts)
-              headers = Helpers::SubscriptionMessage.extract_headers(payload, metadata)
+              headers = metadata[:headers] || {}
               props   = metadata[:properties] || {}
-
-              body = payload.is_a?(Hash) ? payload : Helpers::Decryption.decrypt_if_needed(payload, metadata)
+              body    = payload.is_a?(Hash) ? payload : {}
 
               record = build_escalation_record(body, props, headers)
 
@@ -29,12 +29,6 @@ module Legion
             rescue Sequel::UniqueConstraintViolation => e
               handle_exception(e, level: :debug, handled: true, operation: 'escalations.insert_race')
               { result: :duplicate }
-            rescue Helpers::DecryptionUnavailable => e
-              handle_exception(e, level: :warn, handled: true, operation: 'escalations.insert.decrypt')
-              raise
-            rescue Helpers::DecryptionFailed => e
-              handle_exception(e, level: :error, handled: true, operation: 'escalations.insert.decrypt')
-              raise
             rescue StandardError => e
               handle_exception(e, level: :error, handled: true, operation: 'escalations.insert')
               raise
@@ -45,13 +39,12 @@ module Legion
             private
 
             def build_escalation_record(body, props, headers)
-              history = Array(body[:history])
-              identity = Helpers::CallerIdentity.normalize(
-                caller_raw: body[:caller], identity: body[:identity], headers: headers
-              )
+              history  = Array(body[:history])
+              refs     = IdentityResolution.resolve_refs(body: body, headers: headers)
+              canon    = IdentityResolution.canonical_name(body: body, headers: headers)
 
               first_attempt = history.first || {}
-              last_attempt = history.last || {}
+              last_attempt  = history.last || {}
 
               {
                 uuid:                    stable_uuid(props[:message_id] || body[:event_id] || SecureRandom.uuid),
@@ -67,10 +60,10 @@ module Legion
                 error_category:          body[:error_category] || extract_error_category(first_attempt),
                 attempt_no:              history.size || (body[:attempt_no] || 1),
                 latency_ms:              history.sum { |a| (a[:duration_ms] || 0).to_i } || body[:latency_ms].to_i,
-                identity_canonical_name: identity[:identity],
-                identity_principal_id:   identity[:principal_id],
-                identity_id:             identity[:identity_id],
-                history_json:            history.any? ? Helpers::Json.dump(history) : nil,
+                identity_canonical_name: canon,
+                identity_principal_id:   refs[:principal_id],
+                identity_id:             refs[:identity_id],
+                history_json:            history.any? ? Legion::JSON.dump(history) : nil, # rubocop:disable Legion/HelperMigration/DirectJson
                 outcome:                 body[:outcome]&.to_s,
                 total_attempts:          body[:attempts] ? body[:attempts].to_i : history.size,
                 recorded_at:             body[:recorded_at] || body[:timestamp] || Time.now.utc,

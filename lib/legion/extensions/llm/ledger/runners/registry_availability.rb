@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
+require 'legion/json'
+require 'legion/logging'
 require 'legion/data/model'
-require_relative '../helpers/caller_identity'
-require_relative '../helpers/identity_resolution'
-require_relative '../helpers/json'
+require_relative 'identity_resolution'
 
 module Legion
   module Extensions
@@ -12,12 +12,13 @@ module Legion
         module Runners
           module RegistryAvailability
             extend self
+            extend Legion::Logging::Helper
 
             def insert(payload:, metadata: {}, **_opts)
-              headers = Helpers::SubscriptionMessage.extract_headers(payload, metadata)
+              headers = metadata[:headers] || {}
               props   = metadata[:properties] || {}
+              body    = payload.is_a?(Hash) ? payload : {}
 
-              body = symbolize(payload)
               record = build_registry_availability_record(body, props, headers)
               registry_relation.insert(record)
               log.info("[ledger] registry_availability.insert event_id=#{record[:event_id]}")
@@ -36,8 +37,10 @@ module Legion
 
             def build_registry_availability_record(body, props, headers)
               offering = body[:offering] || {}
-              runtime = body[:runtime] || {}
-              lane = body[:lane]
+              runtime  = body[:runtime] || {}
+              lane     = body[:lane]
+              refs     = IdentityResolution.resolve_refs(body: body, headers: headers)
+              canon    = IdentityResolution.canonical_name(body: body, headers: headers)
 
               {
                 event_id:                body[:event_id],
@@ -59,9 +62,9 @@ module Legion
                 lane_key:                lane_key(lane),
                 worker_id:               runtime[:worker_id] || runtime[:worker],
                 node_id:                 runtime[:node_id] || runtime[:host_id],
-                identity_canonical_name: extract_canonical_name(body, headers),
-                identity_principal_id:   extract_identity_principal_id(body, headers),
-                identity_id:             extract_identity_id(body, headers),
+                identity_canonical_name: canon,
+                identity_principal_id:   refs[:principal_id],
+                identity_id:             refs[:identity_id],
                 offering_json:           json_dump(offering),
                 runtime_json:            json_dump(runtime),
                 capacity_json:           json_dump(body[:capacity] || {}),
@@ -70,35 +73,6 @@ module Legion
                 metadata_json:           json_dump(body[:metadata] || {}),
                 inserted_at:             Time.now.utc
               }
-            end
-
-            def extract_canonical_name(body, headers)
-              raw = headers['x-legion-identity'] ||
-                    body.dig(:identity, :identity) ||
-                    body.dig(:identity, :canonical_name)
-              raw.to_s unless raw.nil? || raw.to_s.empty?
-            end
-
-            def extract_identity_principal_id(body, headers)
-              raw = extract_canonical_name(body, headers)
-              if raw && Helpers::IdentityResolution.identity_tables_available?
-                body_with_identity = body.merge(caller_identity: raw)
-                Helpers::IdentityResolution.resolve_identity(body_with_identity)[:principal_id]
-              end
-            rescue StandardError => e
-              handle_exception(e, level: :warn, handled: true, operation: 'registry_availability.identity_principal')
-              nil
-            end
-
-            def extract_identity_id(body, headers)
-              raw = extract_canonical_name(body, headers)
-              if raw && Helpers::IdentityResolution.identity_tables_available?
-                body_with_identity = body.merge(caller_identity: raw)
-                Helpers::IdentityResolution.resolve_identity(body_with_identity)[:identity_id]
-              end
-            rescue StandardError => e
-              handle_exception(e, level: :warn, handled: true, operation: 'registry_availability.identity')
-              nil
             end
 
             def lane_key(lane)
@@ -110,7 +84,7 @@ module Legion
             end
 
             def json_dump(value)
-              Helpers::Json.dump(json_safe(value))
+              Legion::JSON.dump(json_safe(value)) # rubocop:disable Legion/HelperMigration/DirectJson
             end
 
             def json_safe(value)
@@ -121,17 +95,6 @@ module Legion
                 value.map { |nested| json_safe(nested) }
               when Symbol
                 value.to_s
-              else
-                value
-              end
-            end
-
-            def symbolize(value)
-              case value
-              when Hash
-                value.to_h { |key, nested| [key.to_sym, symbolize(nested)] }
-              when Array
-                value.map { |nested| symbolize(nested) }
               else
                 value
               end

@@ -2,10 +2,10 @@
 
 require 'digest'
 require 'securerandom'
+require 'legion/json'
+require 'legion/logging'
 require 'legion/data/model'
-require_relative '../helpers/caller_identity'
-require_relative '../helpers/decryption'
-require_relative '../helpers/json'
+require_relative 'identity_resolution'
 
 module Legion
   module Extensions
@@ -14,12 +14,12 @@ module Legion
         module Runners
           module Skills
             extend self
+            extend Legion::Logging::Helper
 
             def insert(payload:, metadata: {}, **_opts)
-              headers = Helpers::SubscriptionMessage.extract_headers(payload, metadata)
+              headers = metadata[:headers] || {}
               props   = metadata[:properties] || {}
-
-              body = payload.is_a?(Hash) ? payload : Helpers::Decryption.decrypt_if_needed(payload, metadata)
+              body    = payload.is_a?(Hash) ? payload : {}
 
               record = build_skill_record(body, props, headers)
 
@@ -29,12 +29,6 @@ module Legion
             rescue Sequel::UniqueConstraintViolation => e
               handle_exception(e, level: :debug, handled: true, operation: 'skills.insert_race')
               { result: :duplicate }
-            rescue Helpers::DecryptionUnavailable => e
-              handle_exception(e, level: :warn, handled: true, operation: 'skills.insert.decrypt')
-              raise
-            rescue Helpers::DecryptionFailed => e
-              handle_exception(e, level: :error, handled: true, operation: 'skills.insert.decrypt')
-              raise
             rescue StandardError => e
               handle_exception(e, level: :error, handled: true, operation: 'skills.insert')
               raise
@@ -45,9 +39,8 @@ module Legion
             private
 
             def build_skill_record(body, props, headers)
-              identity = Helpers::CallerIdentity.normalize(
-                caller_raw: body[:caller], identity: body[:identity], headers: headers
-              )
+              refs  = IdentityResolution.resolve_refs(body: body, headers: headers)
+              canon = IdentityResolution.canonical_name(body: body, headers: headers)
               skill = body[:skill] || {}
 
               {
@@ -59,9 +52,9 @@ module Legion
                 trigger:                 skill[:trigger] || body[:trigger],
                 status:                  body[:status] || 'completed',
                 duration_ms:             body[:duration_ms].to_i,
-                identity_canonical_name: identity[:identity],
-                identity_principal_id:   identity[:principal_id],
-                identity_id:             identity[:identity_id],
+                identity_canonical_name: canon,
+                identity_principal_id:   refs[:principal_id],
+                identity_id:             refs[:identity_id],
                 recorded_at:             body[:recorded_at] || body[:timestamp] || Time.now.utc,
                 inserted_at:             Time.now.utc
               }
