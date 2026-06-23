@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.8.0] - 2026-06-22
+
+### Changed
+- **Architecture overhaul:** Table-owning runners (Conversations, Messages, Requests, Responses, Metrics, RouteAttempts, ContextAccountingEvents) each own their table with `fetch(id:, uuid:, ref:)` and `find_or_create` backed by bidirectional Legion::Cache.
+- Prompts and Metering are now pure orchestrators — they call table-owning runners instead of touching models directly.
+- Tools, Escalations, Skills wired to use `Conversations.fetch(ref:)` and `Responses.fetch(request_id:)` instead of raw model lookups.
+- Deleted entire `helpers/` directory (14 files, -2938 lines) — only `helpers/identity_resolution.rb` remains.
+- Removed SubscriptionActor, PersistenceLogging, ResponseMessageLinking, Decryption, Json wrapper, Retention helper, Queries helper.
+- Transport base class handles decryption — no decrypt code in ledger.
+- Added `legion-cache` dependency for hot-path lookup caching.
+
+### Fixed
+- Eliminated 6+ unnecessary DB round-trips per message (Model[id] reloads after create).
+- Conversation/Request/Response lookups now cached bidirectionally — second message in same conversation skips DB entirely.
+
 ## [0.7.8] - 2026-06-22
 
 ### Changed
