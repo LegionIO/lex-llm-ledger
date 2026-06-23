@@ -84,6 +84,7 @@ Legion::Data::Models.require_sequel_models(%w[
                                              llm/tool_call
                                              llm/tool_call_attempt
                                              llm/route_attempt
+                                             llm/context_accounting_event
                                            ])
 
 $LOADED_FEATURES << 'legionio.rb'
@@ -103,6 +104,9 @@ require 'legion/extensions/llm/ledger/runners/conversations'
 require 'legion/extensions/llm/ledger/runners/messages'
 require 'legion/extensions/llm/ledger/runners/requests'
 require 'legion/extensions/llm/ledger/runners/responses'
+require 'legion/extensions/llm/ledger/runners/metrics'
+require 'legion/extensions/llm/ledger/runners/route_attempts'
+require 'legion/extensions/llm/ledger/runners/context_accounting_events'
 require 'legion/extensions/llm/ledger/runners/metering'
 require 'legion/extensions/llm/ledger/runners/prompts'
 require 'legion/extensions/llm/ledger/runners/tools'
@@ -141,6 +145,7 @@ RSpec.configure do |config|
     %i[
       llm_security_events
       llm_policy_evaluations
+      llm_context_accounting_events
       llm_tool_call_attempts
       llm_tool_calls
       llm_message_inference_metrics
