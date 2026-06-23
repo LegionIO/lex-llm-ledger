@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
 require 'legion/extensions/llm/responses/thinking_extractor'
+require 'legion/data/model'
 require_relative 'stable_identifiers'
 require_relative 'request_refs'
 require_relative 'identity_resolution'
 require_relative 'lifecycle_enrichment'
-require_relative 'response_message_linking'
 require_relative 'route_attempt_persistence'
 
 module Legion
@@ -26,7 +26,7 @@ module Legion
               request = find_or_create_request(conversation, user_message, body)
               response_message = find_or_create_response_message(conversation, request, body)
               response = find_or_create_response(request, response_message, body)
-              ResponseMessageLinking.response_message_linking_link_response_message!(response_message, response)
+              link_response_message!(response_message, response)
               metric = find_or_create_metric(request, response, body)
               RouteAttemptPersistence.write_route_attempts(request, response, body)
               { result: :ok, request_id: request[:id], response_id: response[:id], metric_id: metric[:id] }
@@ -43,11 +43,11 @@ module Legion
 
             def find_or_create_conversation(body)
               uuid = stable_uuid(reference(body, :conversation_id, :conversation_ref) || 'default-conversation')
-              existing = llm_conversation_model.first(uuid: uuid)
+              existing = Legion::Data::Models::LLM::Conversation.first(uuid: uuid)
               return existing if existing
 
-              conversation_id = persist_model(
-                model_class: llm_conversation_model,
+              persist_model(
+                model_class: Legion::Data::Models::LLM::Conversation,
                 attrs:       {
                   uuid:                    uuid,
                   title:                   body[:title] || body[:conversation_title],
@@ -66,21 +66,20 @@ module Legion
                 },
                 operation:   'lifecycle_persistence.conversation'
               )
-              llm_conversation_model[conversation_id]
             rescue Sequel::UniqueConstraintViolation => e
               handle_exception(e, level: :debug, handled: true, operation: 'lifecycle_persistence.conversation_race')
-              llm_conversation_model.first(uuid: uuid)
+              Legion::Data::Models::LLM::Conversation.first(uuid: uuid)
             end
 
             def find_or_create_user_message(conversation, body)
               uuid = stable_uuid(reference(body, :message_id, :message_id_ctx) || "request-message:#{request_ref(body)}")
-              existing = llm_message_model.first(uuid: uuid)
+              existing = Legion::Data::Models::LLM::Message.first(uuid: uuid)
               return existing if existing
 
               seq = body[:message_seq] ? LifecycleEnrichment.integer(body[:message_seq]) : next_message_seq(conversation)
               identity_refs = IdentityResolution.caller_identity_refs(body)
-              message_id = persist_model(
-                model_class: llm_message_model,
+              persist_model(
+                model_class: Legion::Data::Models::LLM::Message,
                 attrs:       {
                   uuid:                    uuid,
                   conversation_id:         conversation[:id],
@@ -98,22 +97,21 @@ module Legion
                 },
                 operation:   'lifecycle_persistence.user_message'
               )
-              llm_message_model[message_id]
             rescue Sequel::UniqueConstraintViolation => e
               handle_exception(e, level: :debug, handled: true, operation: 'lifecycle_persistence.user_message_race')
-              llm_message_model.first(uuid: uuid) ||
-                llm_message_model.first(conversation_id: conversation[:id], seq: seq)
+              Legion::Data::Models::LLM::Message.first(uuid: uuid) ||
+                Legion::Data::Models::LLM::Message.first(conversation_id: conversation[:id], seq: seq)
             end
 
             def find_or_create_request(conversation, latest_message, body)
               request_id = request_ref(body)
-              existing = llm_request_model.lookup(request_id)
+              existing = Legion::Data::Models::LLM::MessageInferenceRequest.lookup(request_id)
               return LifecycleEnrichment.enrich_request!(existing, body, latest_message) if existing
 
               operation = LifecycleEnrichment.operation(body)
               identity_refs = IdentityResolution.caller_identity_refs(body)
-              request_row_id = persist_model(
-                model_class: llm_request_model,
+              persist_model(
+                model_class: Legion::Data::Models::LLM::MessageInferenceRequest,
                 attrs:       {
                   uuid:                    stable_uuid(request_id),
                   conversation_id:         conversation[:id],
@@ -149,10 +147,9 @@ module Legion
                 },
                 operation:   'lifecycle_persistence.inference_request'
               )
-              llm_request_model[request_row_id]
             rescue Sequel::UniqueConstraintViolation => e
               handle_exception(e, level: :debug, handled: true, operation: 'lifecycle_persistence.request_race')
-              existing = llm_request_model.lookup(request_id)
+              existing = Legion::Data::Models::LLM::MessageInferenceRequest.lookup(request_id)
               return LifecycleEnrichment.enrich_request!(existing, body, latest_message) if existing
 
               raise
@@ -160,14 +157,14 @@ module Legion
 
             def find_or_create_response_message(conversation, request, body)
               uuid = stable_uuid(reference(body, :response_message_id) || "response-message:#{request_ref(body)}")
-              existing = llm_message_model.first(uuid: uuid)
+              existing = Legion::Data::Models::LLM::Message.first(uuid: uuid)
               return existing if existing
 
-              latest = llm_message_model[request[:latest_message_id]]
+              latest = Legion::Data::Models::LLM::Message[request[:latest_message_id]]
               seq = (latest&.[](:seq) || 1) + 1
               identity_refs = IdentityResolution.caller_identity_refs(body)
-              message_id = persist_model(
-                model_class: llm_message_model,
+              persist_model(
+                model_class: Legion::Data::Models::LLM::Message,
                 attrs:       {
                   uuid:                         uuid,
                   conversation_id:              conversation[:id],
@@ -187,18 +184,17 @@ module Legion
                 },
                 operation:   'lifecycle_persistence.response_message'
               )
-              llm_message_model[message_id]
             rescue Sequel::UniqueConstraintViolation => e
               handle_exception(e, level: :debug, handled: true, operation: 'lifecycle_persistence.response_message_race')
-              llm_message_model.first(uuid: uuid) ||
-                llm_message_model.first(conversation_id: conversation[:id], seq: seq)
+              Legion::Data::Models::LLM::Message.first(uuid: uuid) ||
+                Legion::Data::Models::LLM::Message.first(conversation_id: conversation[:id], seq: seq)
             end
 
             def find_or_create_response(request, response_message, body)
               response_ref = reference(body, :provider_response_ref) ||
                              "response:#{request_ref(body)}:#{LifecycleEnrichment.provider(body) || 'unknown'}"
               response_uuid = stable_uuid(response_ref)
-              existing = llm_response_model.first(uuid: response_uuid)
+              existing = Legion::Data::Models::LLM::MessageInferenceResponse.first(uuid: response_uuid)
               existing ||= request.message_inference_responses_dataset.first
 
               if existing
@@ -211,8 +207,8 @@ module Legion
               is_phi = LifecycleEnrichment.contains_phi?(body)
               identity_refs = IdentityResolution.caller_identity_refs(body)
 
-              response_row_id = persist_model(
-                model_class: llm_response_model,
+              persist_model(
+                model_class: Legion::Data::Models::LLM::MessageInferenceResponse,
                 attrs:       {
                   uuid:                         response_uuid,
                   message_inference_request_id: request[:id],
@@ -245,10 +241,9 @@ module Legion
                 },
                 operation:   'lifecycle_persistence.inference_response'
               )
-              llm_response_model[response_row_id]
             rescue Sequel::UniqueConstraintViolation => e
               handle_exception(e, level: :debug, handled: true, operation: 'lifecycle_persistence.response_race')
-              existing = llm_response_model.first(uuid: response_uuid)
+              existing = Legion::Data::Models::LLM::MessageInferenceResponse.first(uuid: response_uuid)
               return LifecycleEnrichment.enrich_response!(existing, response_message, body) if existing
 
               raise
@@ -256,15 +251,15 @@ module Legion
 
             def find_or_create_metric(request, response, body)
               metric_uuid = stable_uuid(reference(body, :metric_id, :metric_ref) || "metric:#{request_ref(body)}")
-              existing = llm_metric_model.first(uuid: metric_uuid)
+              existing = Legion::Data::Models::LLM::MessageInferenceMetric.first(uuid: metric_uuid)
               if existing
                 LifecycleEnrichment.enrich_metric_context_accounting!(existing, body)
                 return existing
               end
 
               identity_refs = IdentityResolution.caller_identity_refs(body)
-              metric_row_id = persist_model(
-                model_class: llm_metric_model,
+              metric = persist_model(
+                model_class: Legion::Data::Models::LLM::MessageInferenceMetric,
                 attrs:       {
                   uuid:                          metric_uuid,
                   message_inference_request_id:  request[:id],
@@ -290,12 +285,11 @@ module Legion
                 }.merge(context_accounting_metric_columns(body)),
                 operation:   'lifecycle_persistence.inference_metric'
               )
-              metric = llm_metric_model[metric_row_id]
               write_context_accounting_events(request, response, metric, body)
               metric
             rescue Sequel::UniqueConstraintViolation => e
               handle_exception(e, level: :debug, handled: true, operation: 'lifecycle_persistence.metric_race')
-              existing = llm_metric_model.first(uuid: metric_uuid)
+              existing = Legion::Data::Models::LLM::MessageInferenceMetric.first(uuid: metric_uuid)
               return LifecycleEnrichment.enrich_metric_context_accounting!(existing, body) if existing
 
               raise
@@ -370,13 +364,17 @@ module Legion
               handle_exception(e, level: :warn, handled: true, operation: 'lifecycle_persistence.context_accounting_events')
             end
 
+            def link_response_message!(response_message, response)
+              return unless response_message && response
+              return if response_message[:message_inference_response_id] == response[:id]
+
+              response_message.update(message_inference_response_id: response[:id])
+            end
+
             def persist_model(model_class:, attrs:, operation:)
-              Helpers::PersistenceLogging.insert_model(
-                model_class:    model_class,
-                attributes:     attrs,
-                operation:      operation,
-                warn_on_unique: false
-              )
+              record = model_class.create(attrs)
+              log.info("[ledger] #{operation} table=#{model_class.table_name} id=#{record[:id]}")
+              record
             end
 
             def next_message_seq(conversation)
@@ -408,47 +406,6 @@ module Legion
               raw = body[:classification_level] || body.dig(:classification, :level)
               normalized = raw.to_s.downcase
               allowed.include?(normalized) ? normalized : 'internal'
-            end
-
-            def llm_conversation_model
-              ensure_models_loaded!
-              Legion::Data::Models::LLM::Conversation
-            end
-
-            def llm_message_model
-              ensure_models_loaded!
-              Legion::Data::Models::LLM::Message
-            end
-
-            def llm_request_model
-              ensure_models_loaded!
-              Legion::Data::Models::LLM::MessageInferenceRequest
-            end
-
-            def llm_response_model
-              ensure_models_loaded!
-              Legion::Data::Models::LLM::MessageInferenceResponse
-            end
-
-            def llm_metric_model
-              ensure_models_loaded!
-              Legion::Data::Models::LLM::MessageInferenceMetric
-            end
-
-            def ensure_models_loaded!
-              require 'legion/data/model'
-              Legion::Data::Models.instance_variable_set(:@loaded_models, []) unless Legion::Data::Models.loaded_models
-
-              missing = []
-              missing << 'llm/conversation' unless defined?(Legion::Data::Models::LLM::Conversation)
-              missing << 'llm/message' unless defined?(Legion::Data::Models::LLM::Message)
-              missing << 'llm/message_inference_request' unless defined?(Legion::Data::Models::LLM::MessageInferenceRequest)
-              missing << 'llm/message_inference_response' unless defined?(Legion::Data::Models::LLM::MessageInferenceResponse)
-              missing << 'llm/message_inference_metric' unless defined?(Legion::Data::Models::LLM::MessageInferenceMetric)
-              missing << 'llm/context_accounting_event' unless defined?(Legion::Data::Models::LLM::ContextAccountingEvent)
-              missing << 'llm/route_attempt' unless defined?(Legion::Data::Models::LLM::RouteAttempt)
-
-              Legion::Data::Models.require_sequel_models(missing) unless missing.empty?
             end
           end
         end

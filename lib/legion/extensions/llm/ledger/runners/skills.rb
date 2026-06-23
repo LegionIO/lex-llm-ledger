@@ -2,10 +2,10 @@
 
 require 'digest'
 require 'securerandom'
+require 'legion/data/model'
 require_relative '../helpers/caller_identity'
 require_relative '../helpers/decryption'
 require_relative '../helpers/json'
-require_relative '../helpers/persistence_logging'
 
 module Legion
   module Extensions
@@ -23,11 +23,8 @@ module Legion
 
               record = build_skill_record(body, props, headers)
 
-              Helpers::PersistenceLogging.insert_dataset(
-                relation:   Legion::Data::Models::LLM::Conversation.dataset.from(:llm_skill_events),
-                attributes: record,
-                operation:  'skills.insert'
-              )
+              Legion::Data::Models::LLM::Conversation.db[:llm_skill_events].insert(record)
+              log.info("[ledger] skills.insert uuid=#{record[:uuid]}")
               { result: :ok }
             rescue Sequel::UniqueConstraintViolation => e
               handle_exception(e, level: :debug, handled: true, operation: 'skills.insert_race')

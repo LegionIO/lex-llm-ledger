@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
+require 'legion/data/model'
 require_relative '../helpers/caller_identity'
 require_relative '../helpers/identity_resolution'
 require_relative '../helpers/json'
-require_relative '../helpers/persistence_logging'
 
 module Legion
   module Extensions
@@ -19,11 +19,8 @@ module Legion
 
               body = symbolize(payload)
               record = build_registry_availability_record(body, props, headers)
-              Helpers::PersistenceLogging.insert_dataset(
-                relation:   registry_relation,
-                attributes: record,
-                operation:  'registry_availability.insert'
-              )
+              registry_relation.insert(record)
+              log.info("[ledger] registry_availability.insert event_id=#{record[:event_id]}")
               { result: :ok }
             rescue Sequel::UniqueConstraintViolation => e
               handle_exception(e, level: :debug, handled: true, operation: 'registry_availability.insert_race')

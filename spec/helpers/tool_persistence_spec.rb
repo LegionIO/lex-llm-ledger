@@ -1,32 +1,30 @@
 # frozen_string_literal: true
 
 RSpec.describe Legion::Extensions::Llm::Ledger::Helpers::ToolPersistence do
-  let(:db) { Legion::Data::Models::LLM::ToolCall.db }
-
   def stable_uuid(value)
     Legion::Extensions::Llm::Ledger::Helpers::StableIdentifiers.stable_uuid(value)
   end
 
   def seed_request_with_response(request_ref: 'req-1', conversation_ref: 'conv-1')
-    conversation_id = db[:llm_conversations].insert(
+    conversation = Legion::Data::Models::LLM::Conversation.create(
       uuid:             stable_uuid(conversation_ref),
       retention_policy: 'default',
       inserted_at:      Time.now.utc,
       created_at:       Time.now.utc,
       updated_at:       Time.now.utc
     )
-    request_id = db[:llm_message_inference_requests].insert(
+    request = Legion::Data::Models::LLM::MessageInferenceRequest.create(
       uuid:            stable_uuid(request_ref),
-      conversation_id: conversation_id,
+      conversation_id: conversation[:id],
       request_ref:     request_ref,
       request_type:    'chat',
       operation:       'chat',
       status:          'responded',
       inserted_at:     Time.now.utc
     )
-    db[:llm_message_inference_responses].insert(
+    Legion::Data::Models::LLM::MessageInferenceResponse.create(
       uuid:                         stable_uuid("response:#{request_ref}"),
-      message_inference_request_id: request_id,
+      message_inference_request_id: request[:id],
       status:                       'success',
       inserted_at:                  Time.now.utc
     )
@@ -62,7 +60,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Helpers::ToolPersistence do
     )
 
     expect(result).to eq({ result: :ok })
-    expect(db[:llm_tool_calls].count).to eq(1)
-    expect(db[:llm_tool_call_attempts].count).to eq(1)
+    expect(Legion::Data::Models::LLM::ToolCall.count).to eq(1)
+    expect(Legion::Data::Models::LLM::ToolCallAttempt.count).to eq(1)
   end
 end

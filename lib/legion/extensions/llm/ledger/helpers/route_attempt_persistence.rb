@@ -2,9 +2,9 @@
 
 require 'digest'
 require 'legion/logging'
+require 'legion/data/model'
 require_relative 'stable_identifiers'
 require_relative 'json'
-require_relative 'persistence_logging'
 
 module Legion
   module Extensions
@@ -71,12 +71,9 @@ module Legion
             private
 
             def persist_insert(attrs, operation:)
-              Helpers::PersistenceLogging.insert_model(
-                model_class:    Legion::Data::Models::LLM::RouteAttempt,
-                attributes:     attrs,
-                operation:      operation,
-                warn_on_unique: false
-              )
+              record = Legion::Data::Models::LLM::RouteAttempt.create(attrs)
+              log.info("[ledger] #{operation} id=#{record[:id]}")
+              record[:id]
             end
 
             def resolve_identity_principal_id(body)

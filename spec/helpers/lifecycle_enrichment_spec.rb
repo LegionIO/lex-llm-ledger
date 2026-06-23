@@ -1,8 +1,6 @@
 # frozen_string_literal: true
 
 RSpec.describe Legion::Extensions::Llm::Ledger::Helpers::LifecycleEnrichment do
-  let(:db) { Legion::Data::Models::LLM::Conversation.db }
-
   describe '.token_count' do
     it 'supports token alias keys from body[:tokens]' do
       body = { tokens: { input: 4, output: 9, thinking: 2, total: 15 } }
@@ -30,16 +28,16 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Helpers::LifecycleEnrichment do
 
   describe '.enrich_request!' do
     it 'fills missing fields without clobbering richer existing data' do
-      conversation_id = db[:llm_conversations].insert(
+      conversation = Legion::Data::Models::LLM::Conversation.create(
         uuid:             'conv-enrich',
         retention_policy: 'default',
         inserted_at:      Time.now.utc,
         created_at:       Time.now.utc,
         updated_at:       Time.now.utc
       )
-      request_id = db[:llm_message_inference_requests].insert(
+      existing = Legion::Data::Models::LLM::MessageInferenceRequest.create(
         uuid:            'req-enrich',
-        conversation_id: conversation_id,
+        conversation_id: conversation[:id],
         request_ref:     'req-enrich',
         request_type:    'chat',
         operation:       'chat',
@@ -47,7 +45,6 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Helpers::LifecycleEnrichment do
         request_json:    '{}',
         inserted_at:     Time.now.utc
       )
-      existing = Legion::Data::Models::LLM::MessageInferenceRequest[request_id]
 
       described_class.enrich_request!(
         existing,
@@ -55,7 +52,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Helpers::LifecycleEnrichment do
         nil
       )
 
-      updated = Legion::Data::Models::LLM::MessageInferenceRequest[request_id]
+      updated = Legion::Data::Models::LLM::MessageInferenceRequest[existing[:id]]
       expect(updated[:runtime_caller_class]).to eq('Executor')
       expect(updated[:request_json]).not_to eq('{}')
     end

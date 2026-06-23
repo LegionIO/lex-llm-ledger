@@ -1,8 +1,6 @@
 # frozen_string_literal: true
 
 RSpec.describe Legion::Extensions::Llm::Ledger::Helpers::LifecyclePersistence do
-  let(:db) { Legion::Data::Models::LLM::Conversation.db }
-
   let(:prompt_body) do
     {
       conversation_id:     'conv-1',
@@ -39,12 +37,12 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Helpers::LifecyclePersistence do
     result = described_class.write_prompt(prompt_body)
 
     expect(result[:result]).to eq(:ok)
-    expect(db[:llm_messages].count).to eq(2)
-    expect(db[:llm_message_inference_requests].count).to eq(1)
-    expect(db[:llm_message_inference_responses].count).to eq(1)
+    expect(Legion::Data::Models::LLM::Message.count).to eq(2)
+    expect(Legion::Data::Models::LLM::MessageInferenceRequest.count).to eq(1)
+    expect(Legion::Data::Models::LLM::MessageInferenceResponse.count).to eq(1)
 
-    response_message = db[:llm_messages].where(role: 'assistant').first
-    response = db[:llm_message_inference_responses].first
+    response_message = Legion::Data::Models::LLM::Message.first(role: 'assistant')
+    response = Legion::Data::Models::LLM::MessageInferenceResponse.first
     expect(response_message[:message_inference_response_id]).to eq(response[:id])
   end
 
@@ -52,9 +50,9 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Helpers::LifecyclePersistence do
     result = described_class.write_metering(metering_body)
 
     expect(result[:result]).to eq(:ok)
-    expect(db[:llm_messages].count).to eq(0)
-    expect(db[:llm_message_inference_requests].count).to eq(1)
-    expect(db[:llm_message_inference_responses].count).to eq(1)
-    expect(db[:llm_message_inference_metrics].count).to eq(1)
+    expect(Legion::Data::Models::LLM::Message.count).to eq(0)
+    expect(Legion::Data::Models::LLM::MessageInferenceRequest.count).to eq(1)
+    expect(Legion::Data::Models::LLM::MessageInferenceResponse.count).to eq(1)
+    expect(Legion::Data::Models::LLM::MessageInferenceMetric.count).to eq(1)
   end
 end

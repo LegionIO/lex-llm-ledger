@@ -3,9 +3,9 @@
 require 'digest'
 require 'securerandom'
 require 'legion/logging'
+require 'legion/data/model'
 require_relative 'stable_identifiers'
 require_relative 'json'
-require_relative 'persistence_logging'
 
 module Legion
   module Extensions
@@ -75,7 +75,7 @@ module Legion
                                   props[:correlation_id] || headers['x-legion-llm-request-id']
               return nil unless request_reference
 
-              request = llm_request_model.lookup(request_reference)
+              request = Legion::Data::Models::LLM::MessageInferenceRequest.lookup(request_reference)
               return nil unless request
 
               request.message_inference_responses_dataset.first
@@ -86,14 +86,14 @@ module Legion
                                        headers['x-legion-llm-conversation-id']
               return nil unless conversation_reference
 
-              conversation = llm_conversation_model.first(uuid: stable_uuid(conversation_reference)) ||
-                             llm_conversation_model.first(uuid: conversation_reference)
+              conversation = Legion::Data::Models::LLM::Conversation.first(uuid: stable_uuid(conversation_reference)) ||
+                             Legion::Data::Models::LLM::Conversation.first(uuid: conversation_reference)
               conversation&.[](:id)
             end
 
             def find_or_create_tool_call(response:, body:, ctx:, tool:, headers:, identity_attrs:, conversation_id:)
               tool_uuid = derive_tool_call_uuid(body, ctx, tool, headers)
-              existing = llm_tool_call_model.first(uuid: tool_uuid)
+              existing = Legion::Data::Models::LLM::ToolCall.first(uuid: tool_uuid)
               return [existing, false] if existing
 
               response_id = response&.[](:id)
@@ -104,36 +104,32 @@ module Legion
               result_value = tool[:result] || body[:result]
               has_result = tool[:result] || body.key?(:result)
 
-              tool_call_id = Helpers::PersistenceLogging.insert_model(
-                model_class:    llm_tool_call_model,
-                attributes:     {
-                  uuid:                          tool_uuid,
-                  message_inference_response_id: response_id,
-                  conversation_id:               conversation_id,
-                  tool_call_index:               next_index,
-                  provider_tool_call_ref:        tool[:id],
-                  tool_name:                     tool[:name] || headers['x-legion-tool-name'],
-                  tool_source_type:              tool_source[:type] || headers['x-legion-tool-source-type'],
-                  tool_source_server:            tool_source[:server] || headers['x-legion-tool-source-server'],
-                  status:                        status,
-                  tool_arguments_json:           tool[:arguments] ? Helpers::Json.dump(tool[:arguments]) : nil,
-                  tool_result_json:              has_result ? Helpers::Json.dump(result_value) : nil,
-                  tool_category:                 tool[:category] || tool[:tool_category],
-                  data_handling_classification:  tool[:data_handling_classification],
-                  policy_decision:               tool[:policy_decision],
-                  requires_human_approval:       tool[:requires_human_approval],
-                  requested_at:                  timestamps[:tool_start] || tool[:started_at],
-                  completed_at:                  timestamps[:tool_end] || tool[:finished_at],
-                  **identity_attrs,
-                  inserted_at:                   Time.now.utc
-                },
-                operation:      'tool_persistence.tool_call',
-                warn_on_unique: false
+              record = Legion::Data::Models::LLM::ToolCall.create(
+                uuid:                          tool_uuid,
+                message_inference_response_id: response_id,
+                conversation_id:               conversation_id,
+                tool_call_index:               next_index,
+                provider_tool_call_ref:        tool[:id],
+                tool_name:                     tool[:name] || headers['x-legion-tool-name'],
+                tool_source_type:              tool_source[:type] || headers['x-legion-tool-source-type'],
+                tool_source_server:            tool_source[:server] || headers['x-legion-tool-source-server'],
+                status:                        status,
+                tool_arguments_json:           tool[:arguments] ? Helpers::Json.dump(tool[:arguments]) : nil,
+                tool_result_json:              has_result ? Helpers::Json.dump(result_value) : nil,
+                tool_category:                 tool[:category] || tool[:tool_category],
+                data_handling_classification:  tool[:data_handling_classification],
+                policy_decision:               tool[:policy_decision],
+                requires_human_approval:       tool[:requires_human_approval],
+                requested_at:                  timestamps[:tool_start] || tool[:started_at],
+                completed_at:                  timestamps[:tool_end] || tool[:finished_at],
+                **identity_attrs,
+                inserted_at:                   Time.now.utc
               )
-              [llm_tool_call_model[tool_call_id], true]
+              log.info("[ledger] tool_persistence.tool_call id=#{record[:id]} uuid=#{tool_uuid}")
+              [record, true]
             rescue Sequel::UniqueConstraintViolation => e
               handle_exception(e, level: :debug, handled: true, operation: 'tool_persistence.tool_call_race')
-              row = llm_tool_call_model.first(uuid: tool_uuid)
+              row = Legion::Data::Models::LLM::ToolCall.first(uuid: tool_uuid)
               raise unless row
 
               [row, false]
@@ -144,7 +140,7 @@ module Legion
 
               attempt_no = tool_call_row.tool_call_attempts_dataset.max(:attempt_no).to_i + 1
               attempt_uuid = derive_attempt_uuid(tool_call_row[:uuid], attempt_no)
-              existing = llm_tool_call_attempt_model.first(uuid: attempt_uuid)
+              existing = Legion::Data::Models::LLM::ToolCallAttempt.first(uuid: attempt_uuid)
               return existing if existing
 
               status = tool[:status] || headers['x-legion-tool-status'] || 'success'
@@ -153,35 +149,31 @@ module Legion
               timestamps = body[:timestamps] || {}
               runner_ref = body[:worker_id] || body[:runner_ref] || props[:app_id]
 
-              attempt_id = Helpers::PersistenceLogging.insert_model(
-                model_class:    llm_tool_call_attempt_model,
-                attributes:     {
-                  uuid:                attempt_uuid,
-                  tool_call_id:        tool_call_row[:id],
-                  attempt_no:          attempt_no,
-                  runner_ref:          runner_ref,
-                  status:              status,
-                  error_category:      error_hash[:category] || error_hash[:type],
-                  error_code:          error_hash[:code],
-                  error_message:       error_info.is_a?(String) ? error_info : error_hash[:message],
-                  duration_ms:         tool[:duration_ms].to_i,
-                  arguments_ref:       sha256_ref(tool[:arguments]),
-                  result_ref:          sha256_ref(tool[:result] || body[:result]),
-                  attempt_input_json:  tool[:arguments] ? Helpers::Json.dump(tool[:arguments]) : nil,
-                  attempt_output_json: Helpers::Json.dump(tool[:result] || body[:result]),
-                  error_details_json:  tool[:error] ? Helpers::Json.dump(tool[:error]) : nil,
-                  started_at:          timestamps[:tool_start] || tool[:started_at],
-                  ended_at:            timestamps[:tool_end] || tool[:finished_at],
-                  **identity_attrs,
-                  inserted_at:         Time.now.utc
-                },
-                operation:      'tool_persistence.attempt',
-                warn_on_unique: false
+              record = Legion::Data::Models::LLM::ToolCallAttempt.create(
+                uuid:                attempt_uuid,
+                tool_call_id:        tool_call_row[:id],
+                attempt_no:          attempt_no,
+                runner_ref:          runner_ref,
+                status:              status,
+                error_category:      error_hash[:category] || error_hash[:type],
+                error_code:          error_hash[:code],
+                error_message:       error_info.is_a?(String) ? error_info : error_hash[:message],
+                duration_ms:         tool[:duration_ms].to_i,
+                arguments_ref:       sha256_ref(tool[:arguments]),
+                result_ref:          sha256_ref(tool[:result] || body[:result]),
+                attempt_input_json:  tool[:arguments] ? Helpers::Json.dump(tool[:arguments]) : nil,
+                attempt_output_json: Helpers::Json.dump(tool[:result] || body[:result]),
+                error_details_json:  tool[:error] ? Helpers::Json.dump(tool[:error]) : nil,
+                started_at:          timestamps[:tool_start] || tool[:started_at],
+                ended_at:            timestamps[:tool_end] || tool[:finished_at],
+                **identity_attrs,
+                inserted_at:         Time.now.utc
               )
-              llm_tool_call_attempt_model[attempt_id]
+              log.info("[ledger] tool_persistence.attempt id=#{record[:id]}")
+              record
             rescue Sequel::UniqueConstraintViolation => e
               handle_exception(e, level: :debug, handled: true, operation: 'tool_persistence.attempt_race')
-              llm_tool_call_attempt_model.first(uuid: attempt_uuid) || raise
+              Legion::Data::Models::LLM::ToolCallAttempt.first(uuid: attempt_uuid) || raise
             end
 
             def extract_identity_attrs(body, headers)
@@ -241,45 +233,6 @@ module Legion
               ledger = Legion::Settings.dig(:extensions, :llm, :ledger) || {}
               tool_write = ledger[:tool_write] || {}
               (tool_write[key] || default).to_i
-            end
-
-            def llm_request_model
-              ensure_models_loaded!
-              Legion::Data::Models::LLM::MessageInferenceRequest
-            end
-
-            def llm_response_model
-              ensure_models_loaded!
-              Legion::Data::Models::LLM::MessageInferenceResponse
-            end
-
-            def llm_conversation_model
-              ensure_models_loaded!
-              Legion::Data::Models::LLM::Conversation
-            end
-
-            def llm_tool_call_model
-              ensure_models_loaded!
-              Legion::Data::Models::LLM::ToolCall
-            end
-
-            def llm_tool_call_attempt_model
-              ensure_models_loaded!
-              Legion::Data::Models::LLM::ToolCallAttempt
-            end
-
-            def ensure_models_loaded!
-              require 'legion/data/model'
-              Legion::Data::Models.instance_variable_set(:@loaded_models, []) unless Legion::Data::Models.loaded_models
-
-              missing = []
-              missing << 'llm/conversation' unless defined?(Legion::Data::Models::LLM::Conversation)
-              missing << 'llm/message_inference_request' unless defined?(Legion::Data::Models::LLM::MessageInferenceRequest)
-              missing << 'llm/message_inference_response' unless defined?(Legion::Data::Models::LLM::MessageInferenceResponse)
-              missing << 'llm/tool_call' unless defined?(Legion::Data::Models::LLM::ToolCall)
-              missing << 'llm/tool_call_attempt' unless defined?(Legion::Data::Models::LLM::ToolCallAttempt)
-
-              Legion::Data::Models.require_sequel_models(missing) unless missing.empty?
             end
           end
         end
