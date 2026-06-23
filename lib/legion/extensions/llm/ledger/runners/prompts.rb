@@ -6,7 +6,7 @@ require 'legion/logging'
 require 'legion/data/model'
 require 'legion/extensions/llm/responses/thinking_extractor'
 require 'legion/settings'
-require_relative 'identity_resolution'
+require_relative '../helpers/identity_resolution'
 
 module Legion
   module Extensions
@@ -149,7 +149,7 @@ module Legion
               existing = Legion::Data::Models::LLM::Conversation.first(uuid: uuid)
               return existing if existing
 
-              IdentityResolution.resolve_refs(body: body, headers: {})
+              Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
               Legion::Data::Models::LLM::Conversation.create(
                 uuid:                    uuid,
                 title:                   body[:title] || body[:conversation_title],
@@ -160,7 +160,7 @@ module Legion
                 jurisdictions_json:      json_dump(Array(body.dig(:classification, :jurisdictions) || body[:jurisdictions])),
                 retention_policy:        body[:retention_policy] || 'default',
                 expires_at:              body[:expires_at],
-                identity_canonical_name: IdentityResolution.canonical_name(body: body, headers: {}),
+                identity_canonical_name: Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
                 recorded_at:             recorded_at(body),
                 inserted_at:             Time.now.utc,
                 created_at:              Time.now.utc,
@@ -177,7 +177,7 @@ module Legion
               return existing if existing
 
               seq = body[:message_seq] ? integer(body[:message_seq]) : next_message_seq(conversation)
-              identity_refs = IdentityResolution.resolve_refs(body: body, headers: {})
+              identity_refs = Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
               Legion::Data::Models::LLM::Message.create(
                 uuid:                    uuid,
                 conversation_id:         conversation[:id],
@@ -189,7 +189,7 @@ module Legion
                 output_tokens:           0,
                 identity_principal_id:   identity_refs[:principal_id],
                 identity_id:             identity_refs[:identity_id],
-                identity_canonical_name: IdentityResolution.canonical_name(body: body, headers: {}),
+                identity_canonical_name: Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
                 created_at:              recorded_at(body),
                 inserted_at:             Time.now.utc
               )
@@ -205,7 +205,7 @@ module Legion
               return enrich_request!(existing, body, latest_message) if existing
 
               op = operation(body)
-              identity_refs = IdentityResolution.resolve_refs(body: body, headers: {})
+              identity_refs = Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
               Legion::Data::Models::LLM::MessageInferenceRequest.create(
                 uuid:                    stable_uuid(ref),
                 conversation_id:         conversation[:id],
@@ -213,7 +213,7 @@ module Legion
                 parent_request_id:       resolve_parent_request_id(body),
                 caller_principal_id:     identity_refs[:principal_id],
                 caller_identity_id:      identity_refs[:identity_id],
-                identity_canonical_name: IdentityResolution.canonical_name(body: body, headers: {}),
+                identity_canonical_name: Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
                 runtime_caller_type:     caller_type(body),
                 runtime_caller_class:    runtime_caller_class(body),
                 runtime_caller_client:   runtime_caller_client(body),
@@ -254,7 +254,7 @@ module Legion
 
               latest = Legion::Data::Models::LLM::Message[request[:latest_message_id]]
               seq = (latest&.[](:seq) || 1) + 1
-              identity_refs = IdentityResolution.resolve_refs(body: body, headers: {})
+              identity_refs = Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
               Legion::Data::Models::LLM::Message.create(
                 uuid:                         uuid,
                 conversation_id:              conversation[:id],
@@ -268,7 +268,7 @@ module Legion
                 output_tokens:                token_count(body, :output_tokens),
                 identity_principal_id:        identity_refs[:principal_id],
                 identity_id:                  identity_refs[:identity_id],
-                identity_canonical_name:      IdentityResolution.canonical_name(body: body, headers: {}),
+                identity_canonical_name:      Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
                 created_at:                   recorded_at(body),
                 inserted_at:                  Time.now.utc
               )
@@ -293,7 +293,7 @@ module Legion
               vis = visible_response(body)
               thinking = thinking_response(body)
               is_phi = body[:contains_phi] || false
-              identity_refs = IdentityResolution.resolve_refs(body: body, headers: {})
+              identity_refs = Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
 
               Legion::Data::Models::LLM::MessageInferenceResponse.create(
                 uuid:                         response_uuid,
@@ -321,7 +321,7 @@ module Legion
                 escalation_chain_ref:         body[:escalation_chain_ref],
                 identity_principal_id:        identity_refs[:principal_id],
                 identity_id:                  identity_refs[:identity_id],
-                identity_canonical_name:      IdentityResolution.canonical_name(body: body, headers: {}),
+                identity_canonical_name:      Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
                 responded_at:                 recorded_at(body),
                 inserted_at:                  Time.now.utc
               )
@@ -343,7 +343,7 @@ module Legion
                 return existing
               end
 
-              identity_refs = IdentityResolution.resolve_refs(body: body, headers: {})
+              identity_refs = Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
               Legion::Data::Models::LLM::MessageInferenceMetric.create(
                 {
                   uuid:                          metric_uuid,
@@ -364,7 +364,7 @@ module Legion
                   budget_key:                    billing(body)[:budget_id] || billing(body)[:budget_key],
                   identity_principal_id:         identity_refs[:principal_id],
                   identity_id:                   identity_refs[:identity_id],
-                  identity_canonical_name:       IdentityResolution.canonical_name(body: body, headers: {}),
+                  identity_canonical_name:       Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
                   recorded_at:                   recorded_at(body),
                   inserted_at:                   Time.now.utc
                 }.merge(context_accounting_metric_columns(body))
@@ -386,7 +386,7 @@ module Legion
               update_if_missing(updates, existing, :latest_message_id, latest_message&.[](:id))
               update_if_missing(updates, existing, :runtime_caller_class, runtime_caller_class(body))
               update_if_missing(updates, existing, :runtime_caller_client, runtime_caller_client(body))
-              update_if_missing(updates, existing, :identity_canonical_name, IdentityResolution.canonical_name(body: body, headers: {}))
+              update_if_missing(updates, existing, :identity_canonical_name, Helpers::IdentityResolution.canonical_name(body: body, headers: {}))
               update_if_missing(updates, existing, :request_content_hash, resolve_request_content_hash(body))
 
               rj = request_payload(body) ? storage_json_dump(request_payload(body)) : nil
@@ -405,7 +405,7 @@ module Legion
               update_if_missing(updates, existing, :provider_instance, provider_instance(body))
               update_if_missing(updates, existing, :finish_reason, finish_reason(body))
               update_if_missing(updates, existing, :dispatch_path, body[:dispatch_path] || body[:tier])
-              update_if_missing(updates, existing, :identity_canonical_name, IdentityResolution.canonical_name(body: body, headers: {}))
+              update_if_missing(updates, existing, :identity_canonical_name, Helpers::IdentityResolution.canonical_name(body: body, headers: {}))
               update_if_missing(updates, existing, :response_content_hash, resolve_response_content_hash(body))
 
               vis = visible_response(body)
@@ -476,7 +476,7 @@ module Legion
 
                 next if Legion::Data::Models::LLM::RouteAttempt.first(uuid: uuid)
 
-                identity_refs = IdentityResolution.resolve_refs(body: body, headers: {})
+                identity_refs = Helpers::IdentityResolution.resolve_refs(body: body, headers: {})
                 Legion::Data::Models::LLM::RouteAttempt.create(
                   uuid:                          uuid,
                   message_inference_request_id:  request[:id],
@@ -496,7 +496,7 @@ module Legion
                   ended_at:                      attempt[:ended_at],
                   identity_principal_id:         identity_refs[:principal_id],
                   identity_id:                   identity_refs[:identity_id],
-                  identity_canonical_name:       IdentityResolution.canonical_name(body: body, headers: {}),
+                  identity_canonical_name:       Helpers::IdentityResolution.canonical_name(body: body, headers: {}),
                   inserted_at:                   Time.now.utc
                 )
               end
@@ -642,7 +642,7 @@ module Legion
                          body.dig(:identity, :type) ||
                          body.dig(:caller, :requested_by, :type) ||
                          body.dig(:caller, :source)
-              return IdentityResolution.normalize_caller(body: body, headers: {})[:type] if present?(raw_type)
+              return Helpers::IdentityResolution.normalize_caller(body: body, headers: {})[:type] if present?(raw_type)
 
               nil
             end
@@ -892,7 +892,7 @@ module Legion
             end
 
             def official_identity_payload(body, headers)
-              normalized = IdentityResolution.normalize_caller(body: body, headers: headers)
+              normalized = Helpers::IdentityResolution.normalize_caller(body: body, headers: headers)
               {
                 caller_identity:       normalized[:identity],
                 caller_type:           normalized[:type],

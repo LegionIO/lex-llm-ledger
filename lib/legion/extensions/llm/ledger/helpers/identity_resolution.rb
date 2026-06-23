@@ -9,7 +9,7 @@ module Legion
   module Extensions
     module Llm
       module Ledger
-        module Runners
+        module Helpers
           module IdentityResolution
             extend self
             extend Legion::Logging::Helper
@@ -200,10 +200,10 @@ module Legion
               int&.positive? ? int : nil
             end
 
-            def deterministic_uuid(value)
-              hex = Digest::SHA256.hexdigest(value.to_s)[0, 32]
-              "#{hex[0, 8]}-#{hex[8, 4]}-#{hex[12, 4]}-#{hex[16, 4]}-#{hex[20, 12]}"
-            end
+          def deterministic_uuid(value)
+            hex = Digest::SHA256.hexdigest(value.to_s)[0, 32]
+            "#{hex[0, 8]}-#{hex[8, 4]}-#{hex[12, 4]}-#{hex[16, 4]}-#{hex[20, 12]}"
+          end
           end
         end
       end

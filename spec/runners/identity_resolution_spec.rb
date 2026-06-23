@@ -5,9 +5,9 @@ Legion::Data::Models.require_sequel_models(%w[
                                              identity/principal
                                              identity/identity
                                            ])
-require 'legion/extensions/llm/ledger/runners/identity_resolution'
+require 'legion/extensions/llm/ledger/helpers/identity_resolution'
 
-RSpec.describe Legion::Extensions::Llm::Ledger::Runners::IdentityResolution do
+RSpec.describe Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution do
   describe '.normalize_caller' do
     it 'extracts identity from x-legion-identity header' do
       result = described_class.normalize_caller(

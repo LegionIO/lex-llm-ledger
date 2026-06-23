@@ -98,7 +98,7 @@ $LOAD_PATH.unshift(lib) unless $LOAD_PATH.include?(lib)
 
 require 'legion/extensions/llm/responses/thinking_extractor'
 require 'legion/extensions/llm/ledger/version'
-require 'legion/extensions/llm/ledger/runners/identity_resolution'
+require 'legion/extensions/llm/ledger/helpers/identity_resolution'
 require 'legion/extensions/llm/ledger/runners/metering'
 require 'legion/extensions/llm/ledger/runners/prompts'
 require 'legion/extensions/llm/ledger/runners/tools'

@@ -5,7 +5,7 @@ require 'securerandom'
 require 'legion/json'
 require 'legion/logging'
 require 'legion/data/model'
-require_relative 'identity_resolution'
+require_relative '../helpers/identity_resolution'
 
 module Legion
   module Extensions
@@ -40,8 +40,8 @@ module Legion
 
             def build_escalation_record(body, props, headers)
               history  = Array(body[:history])
-              refs     = IdentityResolution.resolve_refs(body: body, headers: headers)
-              canon    = IdentityResolution.canonical_name(body: body, headers: headers)
+              refs     = Helpers::IdentityResolution.resolve_refs(body: body, headers: headers)
+              canon    = Helpers::IdentityResolution.canonical_name(body: body, headers: headers)
 
               first_attempt = history.first || {}
               last_attempt  = history.last || {}

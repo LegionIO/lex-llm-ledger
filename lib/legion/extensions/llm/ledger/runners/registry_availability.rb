@@ -3,7 +3,7 @@
 require 'legion/json'
 require 'legion/logging'
 require 'legion/data/model'
-require_relative 'identity_resolution'
+require_relative '../helpers/identity_resolution'
 
 module Legion
   module Extensions
@@ -39,8 +39,8 @@ module Legion
               offering = body[:offering] || {}
               runtime  = body[:runtime] || {}
               lane     = body[:lane]
-              refs     = IdentityResolution.resolve_refs(body: body, headers: headers)
-              canon    = IdentityResolution.canonical_name(body: body, headers: headers)
+              refs     = Helpers::IdentityResolution.resolve_refs(body: body, headers: headers)
+              canon    = Helpers::IdentityResolution.canonical_name(body: body, headers: headers)
 
               {
                 event_id:                body[:event_id],
