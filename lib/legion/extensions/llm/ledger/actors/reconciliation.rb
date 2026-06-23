@@ -7,7 +7,7 @@ module Legion
         module Actor
           class Reconciliation < Legion::Extensions::Actors::Every
             def runner_class
-              'Legion::Extensions::Llm::Ledger::Legion::Extensions::Llm::Ledger::Runners::Reconciliation'
+              'Legion::Extensions::Llm::Ledger::Runners::Reconciliation'
             end
 
             def runner_function

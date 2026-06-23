@@ -7,7 +7,7 @@ module Legion
         module Actor
           class RetentionPurge < Legion::Extensions::Actors::Every
             def runner_class
-              'Legion::Extensions::Llm::Ledger::Legion::Extensions::Llm::Ledger::Runners::RetentionPurge'
+              'Legion::Extensions::Llm::Ledger::Runners::RetentionPurge'
             end
 
             def runner_function
