@@ -69,11 +69,13 @@ module Legion
                      .all
             end
 
+            PERIOD_SECONDS = { 'hour' => 3600, 'day' => 86_400, 'week' => 604_800, 'month' => 2_592_000 }.freeze
+
             private
 
             def apply_time_window(dataset, since, until_, period)
               if period
-                since  = Helpers::Queries.period_start(period)
+                since  = period_start(period)
                 until_ = Time.now.utc
               end
               dataset = dataset.where { Sequel[:llm_message_inference_metrics][:inserted_at] >= since }  if since
@@ -85,6 +87,10 @@ module Legion
               Legion::Data::Models::LLM::MessageInferenceMetric.dataset
                                                                .join(:llm_message_inference_requests, id: metric[:message_inference_request_id])
                                                                .join(:llm_message_inference_responses, id: metric[:message_inference_response_id])
+            end
+
+            def period_start(period)
+              Time.now.utc - PERIOD_SECONDS.fetch(period.to_s, 86_400)
             end
 
             def group_column(name)

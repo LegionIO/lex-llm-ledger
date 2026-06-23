@@ -8,6 +8,8 @@ module Legion
           module ProviderStats
             extend self # rubocop:disable Style/ModuleFunction
 
+            PERIOD_SECONDS = { 'hour' => 3600, 'day' => 86_400, 'week' => 604_800, 'month' => 2_592_000 }.freeze
+
             def health_report
               ds = official_metrics
                    .where { Sequel[:llm_message_inference_metrics][:recorded_at] >= Time.now.utc - 86_400 }
@@ -27,12 +29,12 @@ module Legion
 
               ds.map do |row|
                 attrs = row.respond_to?(:to_h) ? row.to_h : row.values
-                attrs.merge(status: Helpers::Queries.latency_status(row[:avg_latency_ms]))
+                attrs.merge(status: latency_status(row[:avg_latency_ms]))
               end
             end
 
             def circuit_summary(period: 'hour')
-              since = Helpers::Queries.period_start(period)
+              since = period_start(period)
               official_metrics
                 .where { Sequel[:llm_message_inference_metrics][:inserted_at] >= since }
                 .select_group(
@@ -52,7 +54,7 @@ module Legion
             end
 
             def provider_detail(provider:, period: 'day')
-              since = Helpers::Queries.period_start(period)
+              since = period_start(period)
               official_metrics
                 .where(Sequel[:llm_message_inference_metrics][:provider] => provider)
                 .where { Sequel[:llm_message_inference_metrics][:inserted_at] >= since }
@@ -72,12 +74,26 @@ module Legion
                 .all
             end
 
+            private
+
             def official_metrics
               metric = Sequel[:llm_message_inference_metrics]
               Legion::Data::Models::LLM::MessageInferenceMetric.dataset
                                                                .naked
                                                                .join(:llm_message_inference_requests, id: metric[:message_inference_request_id])
                                                                .join(:llm_message_inference_responses, id: metric[:message_inference_response_id])
+            end
+
+            def period_start(period)
+              Time.now.utc - PERIOD_SECONDS.fetch(period.to_s, 86_400)
+            end
+
+            def latency_status(avg_ms)
+              return :unknown if avg_ms.nil?
+              return :healthy if avg_ms < 2_000
+              return :degraded if avg_ms < 8_000
+
+              :critical
             end
           end
         end
