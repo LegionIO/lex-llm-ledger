@@ -39,3 +39,5 @@ Style/SymbolArray:
 Style/FrozenStringLiteralComment:
   Enabled: true
   EnforcedStyle: always
+Style/ModuleFunction:
+  Enabled: false
