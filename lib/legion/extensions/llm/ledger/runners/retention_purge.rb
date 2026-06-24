@@ -18,13 +18,12 @@ module Legion
             BATCH_SIZE = 500
 
             def purge_expired
-              db = ::Legion::Data.connection
               total_deleted = 0
 
               PURGEABLE_TABLES.each do |table|
-                next unless db.table_exists?(table)
+                next unless purge_relation(table).first_source
 
-                deleted = purge_table(db, table)
+                deleted = purge_table(table)
                 total_deleted += deleted
                 log.info("[ledger] retention_purge: deleted #{deleted} expired rows from #{table}") if deleted.positive?
               end
@@ -37,22 +36,27 @@ module Legion
 
             private
 
-            def purge_table(db, table)
+            def purge_table(table)
               deleted = 0
-              loop do
-                ids = db[table]
-                      .where { expires_at <= Time.now.utc }
-                      .where(Sequel.~(expires_at: nil))
-                      .select(:id)
-                      .limit(BATCH_SIZE)
-                      .select_map(:id)
+              relation = purge_relation(table)
+              max_iterations = 1000
+              max_iterations.times do
+                ids = relation.where { expires_at <= Time.now.utc }
+                              .where(Sequel.~(expires_at: nil))
+                              .select(:id)
+                              .limit(BATCH_SIZE)
+                              .select_map(:id)
                 break if ids.empty?
 
-                db[table].where(id: ids).delete
+                relation.where(id: ids).delete
                 deleted += ids.size
                 break if ids.size < BATCH_SIZE
               end
               deleted
+            end
+
+            def purge_relation(table)
+              Legion::Data::Models::LLM::Conversation.dataset.from(table)
             end
           end
         end

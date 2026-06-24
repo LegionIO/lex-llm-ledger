@@ -24,7 +24,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::UsageReporter do
         budget_id:   'budget_q1'
       }
     }
-    Legion::Extensions::Llm::Ledger::Writers::OfficialMeteringWriter.write(defaults.merge(overrides))
+    Legion::Extensions::Llm::Ledger::Runners::Metering.insert(payload: defaults.merge(overrides), metadata: {})
   end
 
   describe '.summary' do

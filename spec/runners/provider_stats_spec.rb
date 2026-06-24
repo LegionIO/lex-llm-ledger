@@ -20,7 +20,7 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::ProviderStats do
       cost_usd:          0.0,
       recorded_at:       Time.now.utc
     }
-    Legion::Extensions::Llm::Ledger::Writers::OfficialMeteringWriter.write(defaults.merge(overrides))
+    Legion::Extensions::Llm::Ledger::Runners::Metering.insert(payload: defaults.merge(overrides), metadata: {})
   end
 
   describe '.health_report' do

@@ -5,7 +5,7 @@ module Legion
     module Llm
       module Ledger
         module Actor
-          class Reconciliation < Legion::Extensions::Actors::Every # rubocop:disable Legion/Extension/EveryActorRequiresTime
+          class Reconciliation < Legion::Extensions::Actors::Every
             def runner_class
               'Legion::Extensions::Llm::Ledger::Runners::Reconciliation'
             end
@@ -19,8 +19,8 @@ module Legion
             end
 
             def run
-              Runners::Reconciliation.link_orphaned_tool_calls
-              Runners::Reconciliation.link_metering_messages
+              Legion::Extensions::Llm::Ledger::Runners::Reconciliation.link_orphaned_tool_calls
+              Legion::Extensions::Llm::Ledger::Runners::Reconciliation.link_metering_messages
             rescue StandardError => e
               handle_exception(e, level: :warn, handled: true, operation: 'reconciliation')
             end

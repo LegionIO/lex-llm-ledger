@@ -6,6 +6,7 @@ SimpleCov.start
 require 'legion/json'
 require 'legion/logging'
 Legion::Logging.setup(level: 'fatal', log_file: File::NULL, log_stdout: false, async: false)
+require 'legion/data/model'
 require 'legion/settings'
 require 'securerandom'
 require 'sequel'
@@ -35,6 +36,11 @@ module Legion
 
       class Subscription
         include Legion::Logging::Helper
+
+        def self.consumers(count = nil)
+          @consumers = count unless count.nil?
+          @consumers
+        end
 
         def self.prefetch(count = nil)
           @prefetch = count unless count.nil?
@@ -68,6 +74,19 @@ module Legion
   end
 end
 
+Legion::Data::Models.instance_variable_set(:@loaded_models, []) unless Legion::Data::Models.loaded_models
+Legion::Data::Models.require_sequel_models(%w[
+                                             llm/conversation
+                                             llm/message
+                                             llm/message_inference_request
+                                             llm/message_inference_response
+                                             llm/message_inference_metric
+                                             llm/tool_call
+                                             llm/tool_call_attempt
+                                             llm/route_attempt
+                                             llm/context_accounting_event
+                                           ])
+
 $LOADED_FEATURES << 'legionio.rb'
 $LOADED_FEATURES << 'legion/extensions/core.rb'
 $LOADED_FEATURES << 'legion/extensions/actors/subscription'
@@ -80,35 +99,40 @@ $LOAD_PATH.unshift(lib) unless $LOAD_PATH.include?(lib)
 
 require 'legion/extensions/llm/responses/thinking_extractor'
 require 'legion/extensions/llm/ledger/version'
-require 'legion/extensions/llm/ledger/writers/official_prompt_writer'
-require 'legion/extensions/llm/ledger/writers/official_metering_writer'
-require 'legion/extensions/llm/ledger/backfill/legacy_llm_records'
-require 'legion/extensions/llm/ledger/helpers/queries'
-require 'legion/extensions/llm/ledger/helpers/retention'
-require 'legion/extensions/llm/ledger/helpers/decryption'
-require 'legion/extensions/llm/ledger/helpers/subscription_message'
-require 'legion/extensions/llm/ledger/helpers/subscription_actor'
-require 'legion/extensions/llm/ledger/helpers/persistence_logging'
-require 'legion/extensions/llm/ledger/helpers/caller_identity'
+require 'legion/extensions/llm/ledger/helpers/identity_resolution'
+require 'legion/extensions/llm/ledger/runners/conversations'
+require 'legion/extensions/llm/ledger/runners/messages'
+require 'legion/extensions/llm/ledger/runners/requests'
+require 'legion/extensions/llm/ledger/runners/responses'
+require 'legion/extensions/llm/ledger/runners/metrics'
+require 'legion/extensions/llm/ledger/runners/route_attempts'
+require 'legion/extensions/llm/ledger/runners/context_accounting_events'
 require 'legion/extensions/llm/ledger/runners/metering'
 require 'legion/extensions/llm/ledger/runners/prompts'
 require 'legion/extensions/llm/ledger/runners/tools'
+require 'legion/extensions/llm/ledger/runners/skills'
+require 'legion/extensions/llm/ledger/runners/escalations'
 require 'legion/extensions/llm/ledger/runners/usage_reporter'
 require 'legion/extensions/llm/ledger/runners/provider_stats'
 require 'legion/extensions/llm/ledger/runners/registry_availability'
+require 'legion/extensions/llm/ledger/runners/retention_purge'
+require 'legion/extensions/llm/ledger/runners/reconciliation'
 require 'legion/extensions/llm/ledger/transport/exchanges/metering'
 require 'legion/extensions/llm/ledger/transport/exchanges/audit'
 require 'legion/extensions/llm/ledger/transport/exchanges/registry'
 require 'legion/extensions/llm/ledger/transport/queues/metering_write'
 require 'legion/extensions/llm/ledger/transport/queues/audit_prompts'
 require 'legion/extensions/llm/ledger/transport/queues/audit_tools'
+require 'legion/extensions/llm/ledger/transport/queues/audit_skills'
+require 'legion/extensions/llm/ledger/transport/queues/audit_escalations'
 require 'legion/extensions/llm/ledger/transport/queues/registry_availability'
 require 'legion/extensions/llm/ledger/transport/transport'
 require 'legion/extensions/llm/ledger/actors/metering'
 require 'legion/extensions/llm/ledger/actors/prompts'
 require 'legion/extensions/llm/ledger/actors/tools'
+require 'legion/extensions/llm/ledger/actors/skills'
+require 'legion/extensions/llm/ledger/actors/escalations'
 require 'legion/extensions/llm/ledger/actors/registry_availability'
-require 'legion/extensions/llm/ledger/actors/spool_flush'
 
 RSpec.configure do |config|
   config.example_status_persistence_file_path = '.rspec_status'
@@ -121,6 +145,7 @@ RSpec.configure do |config|
     %i[
       llm_security_events
       llm_policy_evaluations
+      llm_context_accounting_events
       llm_tool_call_attempts
       llm_tool_calls
       llm_message_inference_metrics
@@ -137,12 +162,12 @@ RSpec.configure do |config|
       identity_provider_capabilities
       identity_providers
     ].each do |table|
-      Legion::Data.connection[table].delete if Legion::Data.connection.table_exists?(table)
+      Legion::Data::Models::LLM::Conversation.db[table].delete if Legion::Data::Models::LLM::Conversation.db.table_exists?(table)
     end
 
-    Legion::Data.connection[:z_archive_llm_metering_records].delete
-    Legion::Data.connection[:z_archive_llm_prompt_records].delete
-    Legion::Data.connection[:z_archive_llm_tool_records].delete
-    Legion::Data.connection[:llm_registry_availability_records].delete
+    Legion::Data::Models::LLM::Conversation.db[:z_archive_llm_metering_records].delete
+    Legion::Data::Models::LLM::Conversation.db[:z_archive_llm_prompt_records].delete
+    Legion::Data::Models::LLM::Conversation.db[:z_archive_llm_tool_records].delete
+    Legion::Data::Models::LLM::Conversation.db[:llm_registry_availability_records].delete
   end
 end

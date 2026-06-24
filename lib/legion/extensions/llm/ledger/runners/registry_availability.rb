@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
-require_relative '../helpers/caller_identity'
-require_relative '../helpers/json'
-require_relative '../helpers/persistence_logging'
-require_relative '../writers/official_record_writer'
+require 'legion/json'
+require 'legion/logging'
+require 'legion/data/model'
+require_relative '../helpers/identity_resolution'
 
 module Legion
   module Extensions
@@ -12,39 +12,36 @@ module Legion
         module Runners
           module RegistryAvailability
             extend self
+            extend Legion::Logging::Helper
 
-            def write_registry_availability_record(payload = nil, metadata = {}, **message)
-              payload, metadata = normalize_runner_args(payload, metadata, message)
-              headers = Helpers::SubscriptionMessage.extract_headers(payload, metadata)
+            def insert(payload: nil, metadata: nil, **message)
+              payload, metadata = normalize_insert_args(payload, metadata, message)
+              headers = metadata[:headers] || {}
               props   = metadata[:properties] || {}
+              body    = payload.is_a?(Hash) ? payload : {}
 
-              body = symbolize(payload)
               record = build_registry_availability_record(body, props, headers)
-              Helpers::PersistenceLogging.insert_row(
-                ::Legion::Data.connection,
-                :llm_registry_availability_records,
-                record,
-                operation: 'write_registry_availability_record'
-              )
+              registry_relation.insert(record)
+              log.info("[ledger] registry_availability.insert event_id=#{record[:event_id]}")
               { result: :ok }
             rescue Sequel::UniqueConstraintViolation => e
-              log.warn("write_registry_availability_record duplicate insert ignored: #{e.message}")
+              handle_exception(e, level: :warn, handled: true, operation: 'registry_availability.insert_race')
               { result: :duplicate }
             rescue StandardError => e
-              handle_exception(e, level: :error, handled: true, operation: 'write_registry_availability_record')
-              { result: :error, error: e.message }
+              handle_exception(e, level: :error, handled: true, operation: 'registry_availability.insert')
+              raise
             end
+
+            alias write_registry_availability_record insert
 
             private
 
-            def normalize_runner_args(payload, metadata, message)
-              Helpers::SubscriptionMessage.runner_args(payload, metadata, message)
-            end
-
             def build_registry_availability_record(body, props, headers)
               offering = body[:offering] || {}
-              runtime = body[:runtime] || {}
-              lane = body[:lane]
+              runtime  = body[:runtime] || {}
+              lane     = body[:lane]
+              refs     = Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.resolve_refs(body: body, headers: headers)
+              canon    = Legion::Extensions::Llm::Ledger::Helpers::IdentityResolution.canonical_name(body: body, headers: headers)
 
               {
                 event_id:                body[:event_id],
@@ -66,9 +63,9 @@ module Legion
                 lane_key:                lane_key(lane),
                 worker_id:               runtime[:worker_id] || runtime[:worker],
                 node_id:                 runtime[:node_id] || runtime[:host_id],
-                identity_canonical_name: extract_canonical_name(body, headers),
-                identity_principal_id:   extract_identity_principal_id(body, headers),
-                identity_id:             extract_identity_id(body, headers),
+                identity_canonical_name: canon,
+                identity_principal_id:   refs[:principal_id],
+                identity_id:             refs[:identity_id],
                 offering_json:           json_dump(offering),
                 runtime_json:            json_dump(runtime),
                 capacity_json:           json_dump(body[:capacity] || {}),
@@ -77,57 +74,6 @@ module Legion
                 metadata_json:           json_dump(body[:metadata] || {}),
                 inserted_at:             Time.now.utc
               }
-            end
-
-            # Extract identity_canonical_name from AMQP headers or body.
-            # No FK resolution — node/service identities may not be registered in
-            # identity tables, but the canonical name string is still valuable for
-            # tracking which identity is publishing which model availability.
-            def extract_canonical_name(body, headers)
-              raw = headers['x-legion-identity'] ||
-                    body.dig(:identity, :identity) ||
-                    body.dig(:identity, :canonical_name)
-              return nil unless raw && !raw.to_s.empty? # rubocop:disable Legion/Extension/RunnerReturnHash
-
-              raw.to_s
-            end
-
-            # Resolve identity_principal_id from AMQP headers or body.
-            # Uses OfficialRecordWriter.identity_tables_available? to check if FK resolution is possible.
-            def extract_identity_principal_id(body, headers)
-              raw = headers['x-legion-identity'] ||
-                    body.dig(:identity, :identity) ||
-                    body.dig(:identity, :canonical_name)
-              return nil unless raw && !raw.to_s.empty? # rubocop:disable Legion/Extension/RunnerReturnHash
-
-              db = ::Legion::Data.connection
-              return nil unless Writers::OfficialRecordWriter.identity_tables_available?(db) # rubocop:disable Legion/Extension/RunnerReturnHash
-
-              body_with_identity = body.merge(caller_identity: raw)
-              refs = Writers::OfficialRecordWriter.resolve_identity(db, body_with_identity)
-              refs[:principal_id]
-            rescue StandardError => e
-              handle_exception(e, level: :warn, handled: true, operation: 'write_registry_availability_record.identity_principal')
-              nil
-            end
-
-            # Resolve identity_id from AMQP headers or body.
-            # Uses OfficialRecordWriter.identity_tables_available? to check if FK resolution is possible.
-            def extract_identity_id(body, headers)
-              raw = headers['x-legion-identity'] ||
-                    body.dig(:identity, :identity) ||
-                    body.dig(:identity, :canonical_name)
-              return nil unless raw && !raw.to_s.empty? # rubocop:disable Legion/Extension/RunnerReturnHash
-
-              db = ::Legion::Data.connection
-              return nil unless Writers::OfficialRecordWriter.identity_tables_available?(db) # rubocop:disable Legion/Extension/RunnerReturnHash
-
-              body_with_identity = body.merge(caller_identity: raw)
-              refs = Writers::OfficialRecordWriter.resolve_identity(db, body_with_identity)
-              refs[:identity_id]
-            rescue StandardError => e
-              handle_exception(e, level: :warn, handled: true, operation: 'write_registry_availability_record.identity')
-              nil
             end
 
             def lane_key(lane)
@@ -139,7 +85,7 @@ module Legion
             end
 
             def json_dump(value)
-              Helpers::Json.dump(json_safe(value))
+              Legion::JSON.dump(json_safe(value)) # rubocop:disable Legion/HelperMigration/DirectJson
             end
 
             def json_safe(value)
@@ -155,14 +101,16 @@ module Legion
               end
             end
 
-            def symbolize(value)
-              case value
-              when Hash
-                value.to_h { |key, nested| [key.to_sym, symbolize(nested)] }
-              when Array
-                value.map { |nested| symbolize(nested) }
+            def registry_relation
+              Legion::Data::Models::LLM::Conversation.dataset.from(:llm_registry_availability_records)
+            end
+
+            def normalize_insert_args(payload, metadata, message)
+              if payload
+                [payload, metadata || {}]
               else
-                value
+                headers = message.each_with_object({}) { |(k, v), h| h[k.to_s] = v if k.to_s.start_with?('x-legion-') }
+                [message, { headers: headers, properties: { message_id: message[:message_id], correlation_id: message[:correlation_id] } }]
               end
             end
 

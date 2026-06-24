@@ -42,12 +42,12 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::RegistryAvailability do
     }
   end
 
-  describe '.write_registry_availability_record' do
+  describe '.insert' do
     it 'inserts a JSON-safe provider-neutral availability record' do
-      result = described_class.write_registry_availability_record(payload, metadata)
+      result = described_class.insert(payload: payload, metadata: metadata)
       expect(result).to eq({ result: :ok })
 
-      row = Legion::Data.connection[:llm_registry_availability_records].first
+      row = Legion::Data::Models::LLM::Conversation.db[:llm_registry_availability_records].first
       expect(row[:event_id]).to eq('evt-123')
       expect(row[:message_id]).to eq('registry_event_123')
       expect(row[:correlation_id]).to eq('evt-123')
@@ -75,26 +75,26 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::RegistryAvailability do
     end
 
     it 'accepts subscription keyword envelopes with payload and metadata' do
-      result = described_class.write_registry_availability_record(payload: payload, metadata: metadata)
+      result = described_class.insert(payload: payload, metadata: metadata)
 
       expect(result).to eq({ result: :ok })
-      row = Legion::Data.connection[:llm_registry_availability_records].first
+      row = Legion::Data::Models::LLM::Conversation.db[:llm_registry_availability_records].first
       expect(row[:event_id]).to eq('evt-123')
       expect(row[:message_id]).to eq('registry_event_123')
     end
 
     it 'returns duplicate on second insert with same event_id' do
-      described_class.write_registry_availability_record(payload, metadata)
-      result = described_class.write_registry_availability_record(payload, metadata)
+      described_class.insert(payload: payload, metadata: metadata)
+      result = described_class.insert(payload: payload, metadata: metadata)
 
       expect(result).to eq({ result: :duplicate })
-      expect(Legion::Data.connection[:llm_registry_availability_records].count).to eq(1)
+      expect(Legion::Data::Models::LLM::Conversation.db[:llm_registry_availability_records].count).to eq(1)
     end
 
     it 'stores nil identity_canonical_name when no identity is present in headers or body' do
-      described_class.write_registry_availability_record(payload, metadata)
+      described_class.insert(payload: payload, metadata: metadata)
 
-      row = Legion::Data.connection[:llm_registry_availability_records].first
+      row = Legion::Data::Models::LLM::Conversation.db[:llm_registry_availability_records].first
       expect(row[:identity_canonical_name]).to be_nil
     end
 
@@ -106,9 +106,9 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::RegistryAvailability do
           'x-legion-credential'  => 'local'
         }
       )
-      described_class.write_registry_availability_record(payload, metadata_with_identity)
+      described_class.insert(payload: payload, metadata: metadata_with_identity)
 
-      row = Legion::Data.connection[:llm_registry_availability_records].first
+      row = Legion::Data::Models::LLM::Conversation.db[:llm_registry_availability_records].first
       expect(row[:identity_canonical_name]).to eq('lex-llm-ollama')
     end
 
@@ -116,19 +116,31 @@ RSpec.describe Legion::Extensions::Llm::Ledger::Runners::RegistryAvailability do
       payload_with_identity = payload.merge(
         identity: { identity: 'apollo-worker-01', type: 'service', credential: 'local' }
       )
-      described_class.write_registry_availability_record(payload_with_identity, metadata)
+      described_class.insert(payload: payload_with_identity, metadata: metadata)
 
-      row = Legion::Data.connection[:llm_registry_availability_records].first
+      row = Legion::Data::Models::LLM::Conversation.db[:llm_registry_availability_records].first
       expect(row[:identity_canonical_name]).to eq('apollo-worker-01')
     end
 
-    it 'returns error without raising when database persistence fails' do
-      allow(Legion::Data.connection).to receive(:[]).with(:llm_registry_availability_records).and_raise(Sequel::DatabaseError,
-                                                                                                        'database down')
+    it 'raises when database persistence fails so the delivery can retry' do
+      relation = instance_double(Sequel::Dataset)
+      allow(described_class).to receive(:registry_relation).and_return(relation)
+      allow(relation).to receive(:first_source).and_return(:llm_registry_availability_records)
+      allow(relation).to receive(:insert).and_raise(Sequel::DatabaseError, 'database down')
 
-      expect(described_class.write_registry_availability_record(payload, metadata)).to eq(
-        { result: :error, error: 'database down' }
-      )
+      expect do
+        described_class.insert(payload: payload, metadata: metadata)
+      end.to raise_error(Sequel::DatabaseError, /database down/)
+    end
+  end
+
+  # PRESERVATION CONTRACT — verify runtime invariants before the runner rewrite.
+  describe 'preservation contract' do
+    context 'kwargs contract' do
+      it 'accepts kwargs entrypoints for registry writes' do
+        result = described_class.insert(payload: payload, metadata: metadata, ignored: 'ok')
+        expect(result[:result]).to eq(:ok)
+      end
     end
   end
 end

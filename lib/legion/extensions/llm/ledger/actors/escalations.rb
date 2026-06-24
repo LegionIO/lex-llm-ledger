@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require 'legion/extensions/actors/subscription'
-require_relative '../helpers/subscription_actor'
 
 module Legion
   module Extensions
@@ -9,15 +8,11 @@ module Legion
       module Ledger
         module Actor
           class Escalations < Legion::Extensions::Actors::Subscription
-            include Helpers::SubscriptionActor
-
             prefetch 1
 
             def runner_class = Legion::Extensions::Llm::Ledger::Runners::Escalations
 
-            def runner_function
-              'write_escalation_record'
-            end
+            def runner_function = 'insert'
 
             def use_runner?
               false

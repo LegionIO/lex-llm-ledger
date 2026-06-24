@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.8.0] - 2026-06-22
+
+### Changed
+- **Architecture overhaul:** Table-owning runners (Conversations, Messages, Requests, Responses, Metrics, RouteAttempts, ContextAccountingEvents) each own their table with `fetch(id:, uuid:, ref:)` and `find_or_create` backed by bidirectional Legion::Cache.
+- Prompts and Metering are now pure orchestrators — they call table-owning runners instead of touching models directly.
+- Tools, Escalations, Skills wired to use `Conversations.fetch(ref:)` and `Responses.fetch(request_id:)` instead of raw model lookups.
+- Deleted entire `helpers/` directory (14 files, -2938 lines) — only `helpers/identity_resolution.rb` remains.
+- Removed SubscriptionActor, PersistenceLogging, ResponseMessageLinking, Decryption, Json wrapper, Retention helper, Queries helper.
+- Transport base class handles decryption — no decrypt code in ledger.
+- Added `legion-cache` dependency for hot-path lookup caching.
+
+### Fixed
+- Eliminated 6+ unnecessary DB round-trips per message (Model[id] reloads after create).
+- Conversation/Request/Response lookups now cached bidirectionally — second message in same conversation skips DB entirely.
+
+## [0.7.8] - 2026-06-22
+
+### Changed
+- Remove ledger spool handling from the active runtime path so prompt and metering consumers rely on broker retry semantics instead of local drain logic.
+- Align prompt and metering subscription actors with kwargs-based `insert` runner entrypoints.
+
+### Fixed
+- Repair the extracted lifecycle helper flow so prompt-first, metering-first, and redelivery paths reuse existing request/response rows correctly.
+- Route collision and helper rescue handling through `handle_exception` while keeping full-suite RSpec and RuboCop clean.
+
+## [0.7.7] - 2026-06-20
+
+### Changed
+- Cleaned up the official ledger write path to use `legion-data` LLM model classes for the hottest request/response/metric/tool lookups instead of raw `db[:table]` probes.
+- Split request reference resolution into explicit request refs, correlation fallback, and one generated-per-write fallback so the writer no longer hides that flow behind a single opaque expression.
+- Bootstrapped `Legion::Data::Models` on demand inside the ledger writer/tool runner so the same path works under the lightweight spec harness and the normal runtime.
+
+## [0.7.6] - 2026-06-20
+
+### Fixed
+- Mirror the `Subscription` DSL `consumers` accessor in the lightweight test harness so the metering actor loads under spec without depending on the full Legion runtime.
+
 ## [0.7.5] - 2026-06-16
 
 ### Changed

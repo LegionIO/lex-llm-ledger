@@ -5,7 +5,7 @@ module Legion
     module Llm
       module Ledger
         module Actor
-          class RetentionPurge < Legion::Extensions::Actors::Every # rubocop:disable Legion/Extension/EveryActorRequiresTime
+          class RetentionPurge < Legion::Extensions::Actors::Every
             def runner_class
               'Legion::Extensions::Llm::Ledger::Runners::RetentionPurge'
             end
@@ -19,7 +19,7 @@ module Legion
             end
 
             def run
-              Runners::RetentionPurge.purge_expired
+              Legion::Extensions::Llm::Ledger::Runners::RetentionPurge.purge_expired
             rescue StandardError => e
               handle_exception(e, level: :warn, handled: true, operation: 'retention_purge')
             end
