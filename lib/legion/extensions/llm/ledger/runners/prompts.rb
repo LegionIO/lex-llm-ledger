@@ -406,8 +406,7 @@ module Legion
               return existing if updates.empty?
 
               existing = Legion::Extensions::Llm::Ledger::Runners::Requests.enrich(record: existing, updates: updates)
-              existing = Legion::Extensions::Llm::Ledger::Runners::Requests.enrich(record: existing, updates: updates)
-              existing
+              Legion::Extensions::Llm::Ledger::Runners::Requests.enrich(record: existing, updates: updates)
             end
 
             def enrich_response!(existing, response_message, body)
@@ -430,8 +429,7 @@ module Legion
               return existing if updates.empty?
 
               existing = Legion::Extensions::Llm::Ledger::Runners::Responses.enrich(record: existing, updates: updates)
-              existing = Legion::Extensions::Llm::Ledger::Runners::Responses.enrich(record: existing, updates: updates)
-              existing
+              Legion::Extensions::Llm::Ledger::Runners::Responses.enrich(record: existing, updates: updates)
             end
 
             def enrich_metric_context_accounting!(existing, body)
@@ -470,8 +468,7 @@ module Legion
                 context_accounting_json:               storage_json_dump(incoming)
               }
               existing = Legion::Extensions::Llm::Ledger::Runners::Metrics.enrich(record: existing, updates: updates)
-              existing = Legion::Extensions::Llm::Ledger::Runners::Metrics.enrich(record: existing, updates: updates)
-              existing
+              Legion::Extensions::Llm::Ledger::Runners::Metrics.enrich(record: existing, updates: updates)
             rescue StandardError => e
               handle_exception(e, level: :warn, handled: true, operation: 'prompts.context_accounting_enrich')
               existing
